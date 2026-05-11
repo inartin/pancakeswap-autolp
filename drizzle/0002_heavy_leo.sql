@@ -1,1 +1,0 @@
-ALTER TABLE `alert_history` ADD `proximity_threshold_percent` real;

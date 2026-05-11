@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, real } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, real, index } from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';
 
 /**
@@ -324,7 +324,10 @@ export const position_apr_history = sqliteTable('position_apr_history', {
     in_range: integer('in_range', { mode: 'boolean' }).notNull(), // Whether position was in range
     position_value_usd: real('position_value_usd'), // Position value at recording time
     range_percent: real('range_percent')          // Position range width percentage (e.g., 0.6 for ±0.6%)
-});
+}, (table) => ({
+    positionTimeIdx: index('idx_apr_history_position_time').on(table.position_id, table.recorded_at),
+    recordedAtIdx: index('idx_apr_history_recorded_at').on(table.recorded_at),
+}));
 
 /**
  * Recommended indexes (to be created in migration):

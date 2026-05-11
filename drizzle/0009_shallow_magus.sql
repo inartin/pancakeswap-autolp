@@ -1,1 +1,0 @@
-ALTER TABLE `wallets` ADD `split_strategy` integer DEFAULT false NOT NULL;

@@ -121,12 +121,10 @@ export async function startBot() {
 
     // Start background monitoring
     // Alerts (out-of-range, proximity, back-in-range) are sent to position owners
-    // with optional admin copies for monitoring
     // Now also collects market data every 30s automatically
     try {
         startSchedulerMonitoring(bot, {
-            intervalMs: POSITION_MONITOR_INTERVAL_MS,
-            sendToAdmin: false  // Set to false to disable admin monitoring copies
+            intervalMs: POSITION_MONITOR_INTERVAL_MS
         });
         if (process.env.LOG_LEVEL === 'debug') {
             console.log(`🕒 Background monitoring started (${POSITION_MONITOR_INTERVAL_MS / 1000}s intervals).`);

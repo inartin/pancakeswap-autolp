@@ -66,15 +66,13 @@ export async function initializeMarketData(force = true) {
  * to position owners using the NotificationQueueService for rate limiting.
  *
  * Alerts are sent to the user who owns the wallet that owns the position.
- * Optionally sends a copy to admin for monitoring purposes.
- * 
+ *
  * Now also collects SOL/USD price history every 30s for auto-rebalancing.
  */
 export function startMonitoring(bot, options = {}) {
     const queue = new NotificationQueueService();
     const monitor = new PositionMonitorService({ emitProximity: true });
-    const sendToAdmin = options.sendToAdmin ?? true; // Optional admin CC
-    
+
     console.log('\n🚀 Monitoring Started');
     console.log('   Checking positions every 30 seconds...\n');
 
@@ -283,21 +281,6 @@ export function startMonitoring(bot, options = {}) {
                         console.error(`Failed to send alert to user ${ownerTelegramId}:`, err?.message || err);
                     }
                 });
-
-                // Optionally send a copy to admin for monitoring
-                if (sendToAdmin && process.env.TELEGRAM_ADMIN_ID) {
-                    queue.add(async () => {
-                        const adminText = `🔔 *Admin Monitor*\nUser: \`${ownerTelegramId}\`\nType: ${t.type}\n\n${text}`;
-                        try {
-                            await bot.sendMessage(process.env.TELEGRAM_ADMIN_ID, adminText, {
-                                parse_mode: 'Markdown',
-                                disable_web_page_preview: true
-                            });
-                        } catch (err) {
-                            console.error('Failed to send admin copy:', err?.message || err);
-                        }
-                    });
-                }
             }
         } catch (err) {
             console.error('Monitor error:', err?.message || err);

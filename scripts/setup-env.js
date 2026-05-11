@@ -77,7 +77,7 @@ function setupEnvironment() {
 
     console.log('✅ Environment setup complete!\n');
     console.log('Next steps:');
-    console.log('1. Configure TELEGRAM_BOT_TOKEN and TELEGRAM_ADMIN_ID in .env');
+    console.log('1. Configure TELEGRAM_BOT_TOKEN in .env');
     console.log('2. Run: pnpm dev\n');
 }
 

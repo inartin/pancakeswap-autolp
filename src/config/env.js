@@ -7,7 +7,6 @@ import 'dotenv/config';
 export function validateEnv() {
     const required = [
         'TELEGRAM_BOT_TOKEN',
-        'TELEGRAM_ADMIN_ID',
         'SOLANA_RPC_URL'
     ];
 
@@ -23,11 +22,6 @@ export function validateEnv() {
             `Missing required environment variables: ${missing.join(', ')}\n` +
             `Please check your .env file or environment configuration.`
         );
-    }
-
-    // Validate TELEGRAM_ADMIN_ID is a number
-    if (isNaN(parseInt(process.env.TELEGRAM_ADMIN_ID))) {
-        throw new Error('TELEGRAM_ADMIN_ID must be a valid number (your Telegram user ID)');
     }
 
     // Warn if optional API keys are missing
@@ -52,7 +46,6 @@ export function validateEnv() {
  */
 export const env = {
     TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN,
-    TELEGRAM_ADMIN_ID: parseInt(process.env.TELEGRAM_ADMIN_ID),
     SOLANA_RPC_URL: process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com',
     MASTER_PASSWORD: process.env.MASTER_PASSWORD,
     NODE_ENV: process.env.NODE_ENV || 'development',

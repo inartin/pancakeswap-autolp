@@ -69,12 +69,11 @@ Edit `.env` and fill in the minimum required:
 
 ```bash
 TELEGRAM_BOT_TOKEN=your_bot_token_here          # From @BotFather
-TELEGRAM_ADMIN_ID=your_telegram_user_id         # From @userinfobot
 SOLANA_RPC_URL=https://your-rpc-endpoint.com    # Helius recommended
 MASTER_PASSWORD=...                             # Auto-set by setup
 ```
 
-Recommended:
+Recommended (Optional):
 
 ```bash
 JUP_API=your_jupiter_api_key                    # https://portal.jup.ag/

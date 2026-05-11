@@ -10,7 +10,6 @@ All variables live in `.env` (created by `pnpm run setup` from `.env.example`).
 
 ```bash
 TELEGRAM_BOT_TOKEN=your_bot_token_here          # From @BotFather
-TELEGRAM_ADMIN_ID=your_telegram_user_id         # From @userinfobot
 SOLANA_RPC_URL=https://your-rpc-endpoint.com    # Helius recommended
 MASTER_PASSWORD=...                             # Auto-set by `pnpm run setup`
 ```
@@ -86,8 +85,6 @@ Used for token swaps (compounding, rebalancing). The API key enables dynamic rat
 ### Telegram
 
 **Bot token:** Message [@BotFather](https://t.me/botfather), send `/newbot`, follow prompts, copy token into `TELEGRAM_BOT_TOKEN`.
-
-**Your user ID:** Message [@userinfobot](https://t.me/userinfobot), copy the numeric ID into `TELEGRAM_ADMIN_ID`.
 
 ---
 

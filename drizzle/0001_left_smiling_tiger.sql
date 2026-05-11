@@ -1,0 +1,1 @@
+ALTER TABLE `positions` ADD `range_percent` real;

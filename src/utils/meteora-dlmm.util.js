@@ -122,7 +122,9 @@ export async function fetchMeteoraDlmmPositions(walletAddress, connection = null
                             estDayUsd
                         } : null,
                         positionUrl: `https://app.meteora.ag/dlmm/${pool.poolAddress}`,
-                        poolUrl: `https://app.meteora.ag/dlmm/${pool.poolAddress}`
+                        poolUrl: `https://app.meteora.ag/dlmm/${pool.poolAddress}`,
+                        createdAt: pos.createdAt || null,
+                        updatedAt: pos.updatedAt || null
                     });
                 }
             } catch (poolErr) {

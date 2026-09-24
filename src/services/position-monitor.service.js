@@ -2,10 +2,11 @@ import { db } from '../db/index.js';
 import { positions, alert_history, proximity_alerts, position_statistics } from '../db/schema.js';
 import { eq, and, desc } from 'drizzle-orm';
 import { createSolanaConnection } from '../utils/rpc.util.js';
-import { PANCAKESWAP_IDL, PRICE_CACHE_TTL_MS, ALERT_COOLDOWN_MS, PROXIMITY_COOLDOWN_MS } from '../config/constants.js';
+import { PANCAKESWAP_IDL, METEORA_IDL, METEORA_PROGRAM_ID, PRICE_CACHE_TTL_MS, ALERT_COOLDOWN_MS, PROXIMITY_COOLDOWN_MS } from '../config/constants.js';
 import { BorshCoder } from '@coral-xyz/anchor';
 import { PublicKey } from '@solana/web3.js';
 import { getMintDecimals } from '../utils/token.util.js';
+import { binIdToPrice } from '../utils/meteora-dlmm.util.js';
 import { logAlertTrigger } from './alert.service.js';
 import { 
     markOutOfRange, 
@@ -34,6 +35,7 @@ export class PositionMonitorService {
         this.proximityCooldownMs = options.proximityCooldownMs ?? PROXIMITY_COOLDOWN_MS;
         this.emitProximity = options.emitProximity ?? false; // off by default until scheduler handles it
         this.coder = new BorshCoder(PANCAKESWAP_IDL);
+        this.meteoraCoder = new BorshCoder(METEORA_IDL);
         this.lastCheckTime = null; // Track last check time for accumulated time calculations
     }
 
@@ -308,6 +310,18 @@ export class PositionMonitorService {
         const ai = await this.connection.getAccountInfo(poolPk);
         if (!ai) {
             throw new Error('Pool account not found');
+        }
+
+        // Support Meteora DLMM pools
+        if (ai.owner.equals(METEORA_PROGRAM_ID)) {
+            const pairData = this.meteoraCoder.accounts.decode('LbPair', ai.data);
+            const [dec0Maybe, dec1Maybe] = await Promise.all([
+                getMintDecimals(this.connection, pairData.token_x_mint),
+                getMintDecimals(this.connection, pairData.token_y_mint)
+            ]);
+            const decimals0 = typeof dec0Maybe === 'number' ? dec0Maybe : 9;
+            const decimals1 = typeof dec1Maybe === 'number' ? dec1Maybe : 9;
+            return binIdToPrice(pairData.active_id, pairData.bin_step, decimals0, decimals1);
         }
 
         const pool = this.coder.accounts.decode('PoolState', ai.data);

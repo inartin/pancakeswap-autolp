@@ -29,7 +29,7 @@ import { ensureProximityRow, getOutOfRangeConfig, toggleOutOfRangeEnabled, toggl
 import { buildPoolsReplyKeyboard } from '../keyboard.util.js';
 import { updatePoolsReplyKeyboard } from '../keyboard.util.js';
 import { storeKeyboardMessageId } from '../keyboard.util.js';
-import { getPositionStatistics, carryOverStatistics, getDailyAverageApr, getMonthlyAverageApr, getLifetimeAverageApr } from '../../services/position-statistics.service.js';
+import { getPositionStatistics, updateAccumulatedTime, carryOverStatistics, getDailyAverageApr, getMonthlyAverageApr, getLifetimeAverageApr } from '../../services/position-statistics.service.js';
 
 const OUT_RANGE_ALERT_ON = '🔔 Out of Range Alerts';
 const OUT_RANGE_ALERT_OFF = '🔕 Out of Range Alerts';
@@ -140,7 +140,10 @@ export async function handlePositions(bot, msg, opts = {}) {
             // This runs asynchronously so it doesn't block the UI update
             (async () => {
                 try {
-                    const onChainMints = new Set(positions.map(p => p.mintAddress));
+                    const onChainMints = new Set([
+                        ...positions.map(p => p.mintAddress),
+                        ...meteoraPositions.map(p => p.mintAddress)
+                    ]);
                     const dbPositions = await getWalletPositions(wallet.id, 'active');
                     
                     const orphaned = dbPositions.filter(
@@ -300,9 +303,52 @@ export async function handlePositions(bot, msg, opts = {}) {
                 }
             }
 
-            // Append Meteora DLMM positions
+            // Append Meteora DLMM positions with DB tracking for time-in-range statistics
             for (const mPos of meteoraPositions) {
-                positionsData.push(mPos);
+                let statistics = null;
+                let positionId = null;
+
+                try {
+                    const saved = await upsertPosition({
+                        wallet_id: wallet.id,
+                        nft_mint: mPos.mintAddress,
+                        pool_address: mPos.poolId,
+                        token0_mint: mPos.mint0,
+                        token1_mint: mPos.mint1,
+                        token0_symbol: mPos.token0Symbol,
+                        token1_symbol: mPos.token1Symbol,
+                        fee_tier: mPos.feeTierPercent,
+                        lower_price: mPos.lowerPrice,
+                        upper_price: mPos.upperPrice,
+                        current_price: mPos.currentPrice,
+                        liquidity_value_usd: mPos.liquidityValueUsd,
+                        range_percent: mPos.range_percent,
+                        auto_rebalance_enabled: false,
+                        claim_before_rebalance: false,
+                        status: 'active'
+                    });
+
+                    positionId = saved.id;
+                    statistics = await getPositionStatistics(saved.id);
+
+                    // Seed initial time in range from createdAt if statistics is fresh (0 ms accumulated)
+                    if (statistics && (statistics.time_in_range_ms + statistics.time_out_of_range_ms === 0)) {
+                        const createdAtMs = mPos.createdAt ? mPos.createdAt * 1000 : Date.now();
+                        const initialAgeMs = Math.max(0, Date.now() - createdAtMs);
+                        if (initialAgeMs > 0) {
+                            await updateAccumulatedTime(positionId, initialAgeMs, mPos.inRange);
+                            statistics = await getPositionStatistics(positionId);
+                        }
+                    }
+                } catch (dbErr) {
+                    console.warn(`Failed to track Meteora position ${mPos.mintAddress} in DB:`, dbErr.message);
+                }
+
+                positionsData.push({
+                    ...mPos,
+                    statistics,
+                    positionId
+                });
             }
             
             // Filter positions by selected pool (if any)

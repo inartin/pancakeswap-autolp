@@ -3,6 +3,7 @@ import bs58 from 'bs58';
 import { getOrCreateUser } from '../../services/user.service.js';
 import { createWallet, walletExists, createEvmWallet } from '../../services/wallet.service.js';
 import { findPositions } from '../../utils/positions.util.js';
+import { fetchMeteoraDlmmPositions } from '../../utils/meteora-dlmm.util.js';
 import { createSolanaConnection } from '../../utils/rpc.util.js';
 import { validateEvmAddress, getEvmBalance } from '../../utils/evm.util.js';
 import { buildWalletKeyboard, getCancelOnlyKeyboard } from '../keyboard.util.js';
@@ -178,8 +179,18 @@ export async function handlePrivateKeyMessage(bot, msg) {
         const solBalance = (balance / 1e9).toFixed(4);
 
         let positions = [];
+        let meteoraPositions = [];
         try {
-            positions = await findPositions(connection, publicKey);
+            [positions, meteoraPositions] = await Promise.all([
+                findPositions(connection, publicKey).catch(err => {
+                    console.warn('Could not fetch PancakeSwap positions:', err.message);
+                    return [];
+                }),
+                fetchMeteoraDlmmPositions(publicKey, connection).catch(err => {
+                    console.warn('Could not fetch Meteora positions:', err.message);
+                    return [];
+                })
+            ]);
         } catch (error) {
             console.warn('Could not fetch positions:', error.message);
         }
@@ -193,6 +204,11 @@ export async function handlePrivateKeyMessage(bot, msg) {
 
         pendingImports.delete(telegramId);
 
+        let positionsSummary = `*Found ${positions.length} PancakeSwap Position(s)*`;
+        if (meteoraPositions.length > 0) {
+            positionsSummary += `\n*Found ${meteoraPositions.length} Meteora DLMM Position(s)*`;
+        }
+
         const successMessage = `
 ✅ *Wallet Imported Successfully!*
 
@@ -201,7 +217,7 @@ export async function handlePrivateKeyMessage(bot, msg) {
 
 *Balance:* ${solBalance} SOL
 
-*Found ${positions.length} PancakeSwap Position(s)*
+${positionsSummary}
 
 *Next Steps:*
 • /rewards - Check pending rewards

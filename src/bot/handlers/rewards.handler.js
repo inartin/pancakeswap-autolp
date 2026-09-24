@@ -7,6 +7,7 @@ import { formatRewardsMessage, formatErrorMessage, formatLoadingMessage } from '
 import { getActiveWallet, resetWalletRewardsCounter, getWalletRewardsSinceReset } from '../../services/wallet.service.js';
 import { calculateTokenAmounts, toBigInt, toNumberUnits } from '../../utils/range.util.js';
 import { getTokenInfo, getTokenInfoBatch } from '../../utils/token.util.js';
+import { fetchMeteoraDlmmPositions } from '../../utils/meteora-dlmm.util.js';
 
 /**
  * Handles the /rewards command
@@ -48,10 +49,19 @@ export async function handleRewards(bot, msg) {
         // Fetch claimed rewards since last reset
         const { rewardsSinceReset } = await getWalletRewardsSinceReset(wallet.id);
 
-        // Find all PancakeSwap positions for the wallet
-        const positions = await findPositions(connection, walletAddress);
+        // Find all PancakeSwap and Meteora DLMM positions for the wallet
+        const [positions, meteoraPositions] = await Promise.all([
+            findPositions(connection, walletAddress).catch(err => {
+                console.warn('Failed to find PancakeSwap positions for rewards:', err.message);
+                return [];
+            }),
+            fetchMeteoraDlmmPositions(walletAddress, connection).catch(err => {
+                console.warn('Failed to find Meteora positions for rewards:', err.message);
+                return [];
+            })
+        ]);
 
-        if (positions.length === 0) {
+        if (positions.length === 0 && meteoraPositions.length === 0) {
             await bot.editMessageText(
                 formatRewardsMessage(walletAddress, [], rewardsSinceReset, wallet.split_strategy),
                 {
@@ -184,10 +194,15 @@ export async function handleRewards(bot, msg) {
             }
         }
 
-        // Add token prices to each position
+        // Add token prices to each PancakeSwap position
         positionsData.forEach(position => {
             position.tokenPrices = tokenPricesMap;
         });
+
+        // Add Meteora DLMM positions to positionsData
+        for (const mPos of meteoraPositions) {
+            positionsData.push(mPos);
+        }
 
         // Format and send the results
         const message = formatRewardsMessage(walletAddress, positionsData, rewardsSinceReset, wallet.split_strategy);
@@ -199,6 +214,19 @@ export async function handleRewards(bot, msg) {
 
         // Add claim and compound buttons for each position that has rewards
         positionsData.forEach((position, index) => {
+            // Read-only Meteora DLMM: add view link instead of write actions
+            if (position.protocol === 'meteora' || position.isReadOnly) {
+                if (position.unclaimedFeesUsd > 0 || position.unclaimedFeeToken0 > 0 || position.unclaimedFeeToken1 > 0) {
+                    keyboard.inline_keyboard.push([
+                        {
+                            text: `🪐 View on Meteora #${index + 1}`,
+                            url: position.poolUrl || `https://app.meteora.ag/dlmm/${position.poolId}`
+                        }
+                    ]);
+                }
+                return;
+            }
+
             if (position.success && position.transfers && position.transfers.length > 0) {
                 keyboard.inline_keyboard.push([
                     {

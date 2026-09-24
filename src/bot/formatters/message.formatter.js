@@ -48,13 +48,42 @@ function formatDuration(ms) {
 
 export function formatRewardsMessage(walletAddress, positionsData, claimedSinceReset = null, splitStrategy = false) {
     if (!positionsData || positionsData.length === 0) {
-        return `❌ *No Positions Found*\n\nNo PancakeSwap V3 positions detected for this wallet.\n\n*Make sure:*\n• Wallet has PancakeSwap NFTs\n• Positions are on Solana mainnet\n• Position NFTs are in the wallet\n\n*Create a position:*\nVisit [PancakeSwap](https://pancakeswap.finance)\n\nTry again: /rewards`;
+        return `❌ *No Positions Found*\n\nNo PancakeSwap or Meteora DLMM positions detected for this wallet.\n\n*Make sure:*\n• Wallet has active liquidity positions\n• Positions are on Solana mainnet\n\n*Create a position:*\n• Visit [PancakeSwap](https://pancakeswap.finance)\n• Visit [Meteora](https://app.meteora.ag)\n\nTry again: /rewards`;
     }
 
     let message = `💰 *Claimable Rewards*\n\n`;
     let totalValueUsd = 0;
 
     positionsData.forEach((position, index) => {
+        // Handle Meteora DLMM position (read-only)
+        if (position.protocol === 'meteora') {
+            const positionLabel = `🪐 [Meteora DLMM #${index + 1}](${position.poolUrl || `https://app.meteora.ag/dlmm/${position.poolId}`})`;
+            message += `${positionLabel}  *${position.token0Symbol}/${position.token1Symbol}*\n`;
+
+            const hasClaimable = (position.unclaimedFeesUsd > 0) || (position.unclaimedFeeToken0 > 0) || (position.unclaimedFeeToken1 > 0);
+            if (hasClaimable) {
+                totalValueUsd += (position.unclaimedFeesUsd || 0);
+                message += `💰 Claimable: *${formatCurrency(position.unclaimedFeesUsd || 0)}*\n`;
+                if (position.unclaimedFeeToken0 > 0) {
+                    message += `   • ${formatDecimal(position.unclaimedFeeToken0, 'auto')} ${position.token0Symbol}`;
+                    if (position.unclaimedFeeToken0Usd > 0) message += ` (${formatCurrency(position.unclaimedFeeToken0Usd)})`;
+                    message += `\n`;
+                }
+                if (position.unclaimedFeeToken1 > 0) {
+                    message += `   • ${formatDecimal(position.unclaimedFeeToken1, 'auto')} ${position.token1Symbol}`;
+                    if (position.unclaimedFeeToken1Usd > 0) message += ` (${formatCurrency(position.unclaimedFeeToken1Usd)})`;
+                    message += `\n`;
+                }
+                message += `🔒 _Read-only (Claim via Meteora App)_\n\n`;
+            } else {
+                message += `No claimable rewards\n🔒 _Read-only_\n\n`;
+            }
+
+            if (index < positionsData.length - 1) {
+                message += `${LINE_DIVIDER}\n\n`;
+            }
+            return;
+        }
         // Create clickable PancakeSwap link if pool state is available
         const positionLabel = position.poolState && position.mintAddress
             ? `[LP #${index + 1}](https://pancakeswap.finance/liquidity/position/v3/solana/${position.poolState}/${position.mintAddress}?chain=sol&persistChain=1)`
@@ -327,26 +356,31 @@ export function formatLoadingMessage(walletAddress, walletLabel = null) {
  */
 export async function formatPositionsListMessage(positionsData) {
     if (!positionsData || positionsData.length === 0) {
-        return `❌ *No Positions Found*\n\nNo PancakeSwap V3 positions detected for this wallet.\n\n*Make sure:*\n• Wallet has PancakeSwap NFTs\n• Positions are on Solana mainnet\n• Position NFTs are in the wallet\n\n*Create a position:*\nVisit [PancakeSwap](https://pancakeswap.finance)\n\nTry again: /positions or /addposition`;
+        return `❌ *No Positions Found*\n\nNo PancakeSwap or Meteora DLMM positions detected for this wallet.\n\n*Make sure:*\n• Wallet has active liquidity positions\n• Positions are on Solana mainnet\n\n*Create a position:*\n• Visit [PancakeSwap](https://pancakeswap.finance)\n• Visit [Meteora](https://app.meteora.ag)\n\nTry again: /positions or /addposition`;
     }
 
     let message = ``;
 
     for (const [index, position] of positionsData.entries()) {
         // Position header
+        const isMeteora = position.protocol === 'meteora';
         const positionIdStr = position.positionId ? ` (ID: ${position.positionId})` : '';
         const feeStr = position.feeTierPercent != null 
             ? ` Fee: ${(position.feeTierPercent * 100).toFixed(2)}%` 
             : '';
-        message += `*Position #${index + 1}*${positionIdStr}${feeStr}\n\n`;
+        
+        if (isMeteora) {
+            message += `🪐 *Meteora DLMM Position #${index + 1}*${feeStr}\n\n`;
+        } else {
+            message += `*Position #${index + 1}*${positionIdStr}${feeStr}\n\n`;
+        }
 
         // Get token symbols
-        const { ticker: token0Symbol } = await getTokenInfo(position.mint0);
-        const { ticker: token1Symbol } = await getTokenInfo(position.mint1);
+        const token0Symbol = position.token0Symbol || (await getTokenInfo(position.mint0))?.ticker || 'T0';
+        const token1Symbol = position.token1Symbol || (await getTokenInfo(position.mint1))?.ticker || 'T1';
 
         // Pool name and fee tier
         message += `💧 ${token0Symbol}/${token1Symbol}`;
-
 
         // Liquidity status (show USD value if available, otherwise just show active status)
         if (position.liquidityValueUsd && position.liquidityValueUsd > 0) {
@@ -356,6 +390,30 @@ export async function formatPositionsListMessage(positionsData) {
         // Position visualization
         const visualization = formatPositionVisualization(position);
         message += `\n${visualization}\n`;
+
+        // Display Meteora claimable fees and stats
+        if (isMeteora) {
+            message += `\n💰 *Claimable Fees:* ${formatCurrency(position.unclaimedFeesUsd || 0)}\n`;
+            if ((position.unclaimedFeeToken0 > 0) || (position.unclaimedFeeToken1 > 0)) {
+                if (position.unclaimedFeeToken0 > 0) {
+                    message += `   • ${formatDecimal(position.unclaimedFeeToken0, 'auto')} ${token0Symbol}`;
+                    if (position.unclaimedFeeToken0Usd > 0) message += ` (${formatCurrency(position.unclaimedFeeToken0Usd)})`;
+                    message += `\n`;
+                }
+                if (position.unclaimedFeeToken1 > 0) {
+                    message += `   • ${formatDecimal(position.unclaimedFeeToken1, 'auto')} ${token1Symbol}`;
+                    if (position.unclaimedFeeToken1Usd > 0) message += ` (${formatCurrency(position.unclaimedFeeToken1Usd)})`;
+                    message += `\n`;
+                }
+            }
+            if (position.allTimeFeesUsd > 0 || position.allTimeFeesToken0 > 0 || position.allTimeFeesToken1 > 0) {
+                message += `🧾 *All-Time Fees Earned:* ${formatCurrency(position.allTimeFeesUsd || 0)}\n`;
+            }
+            if (position.amount0Human != null && position.amount1Human != null) {
+                message += `\n💎 *Liquidity:*\n`;
+                message += `   ${formatDecimal(position.amount0Human, 'auto')} ${token0Symbol} | ${formatDecimal(position.amount1Human, 'auto')} ${token1Symbol}\n`;
+            }
+        }
 
         // APR information (if available)
         if (position.aprData) {
@@ -381,15 +439,6 @@ export async function formatPositionsListMessage(positionsData) {
                     }
                     message += dailyLine;
                 }
-                
-                // Show monthly average if we have enough samples (at least 6 = ~1 day of 4-hour samples)
-                // if (monthly && monthly.sampleCount >= 6 && monthly.avgPositionApr != null) {
-                //     let monthlyLine = `\n📊 Avg 30d: ${formatPercentage(monthly.avgPositionApr)}`;
-                //     if (monthly.avgRangePercent != null) {
-                //         monthlyLine += ` | Range: ±${monthly.avgRangePercent.toFixed(1)}%`;
-                //     }
-                //     message += monthlyLine;
-                // }
                 
                 // Show lifetime average if we have enough samples (at least 6 = ~1 day of 4-hour samples)
                 if (lifetime && lifetime.sampleCount >= 6 && lifetime.avgPositionApr != null) {
@@ -448,21 +497,20 @@ export async function formatPositionsListMessage(positionsData) {
             } else {
                 message += `\n⏱️ *Time in Range:* No data yet\n`;
             }
-        } else {
+        } else if (!isMeteora) {
             message += `\n⏱️ *Time in Range:* No data yet\n`;
         }
 
-        // Deposited tokens
-        // if (position.amount0Human != null && position.amount1Human != null) {
-        //     message += `\n💎 *Liquidity:*\n`;
-        //     message += `${formatTokenAmount(position.amount0Human)} ${token0Symbol} | `; //Token 0
-        //     message += `${formatTokenAmount(position.amount1Human)} ${token1Symbol}\n`; //Token 1
-        // }
-
         // Add links to position and pool
-        const positionUrl = getPancakeSwapPositionUrl(position.poolId, position.mintAddress);
-        const poolUrl = getPancakeSwapPoolUrl(position.poolId);
-        message += `\n[View Position →](${positionUrl})  |  [View Pool →](${poolUrl})\n`;
+        if (isMeteora) {
+            const meteoraUrl = position.poolUrl || `https://app.meteora.ag/dlmm/${position.poolId}`;
+            const solscanUrl = `https://solscan.io/account/${position.mintAddress}`;
+            message += `\n[View on Meteora →](${meteoraUrl})  |  [View on Solscan →](${solscanUrl})\n🔒 _Read-only (Meteora DLMM)_\n`;
+        } else {
+            const positionUrl = getPancakeSwapPositionUrl(position.poolId, position.mintAddress);
+            const poolUrl = getPancakeSwapPoolUrl(position.poolId);
+            message += `\n[View Position →](${positionUrl})  |  [View Pool →](${poolUrl})\n`;
+        }
 
         // Add separator between positions (except after last one)
         if (index < positionsData.length - 1) {

@@ -11,6 +11,7 @@ import { createSolanaConnection } from '../../utils/rpc.util.js';
 import { COMMITMENT_LEVEL, DEFAULT_ADD_LIQUIDITY_SLIPPAGE_BPS, RECOMMENDED_SOL_BUFFER } from '../../config/constants.js';
 import { isEvmWallet, getEvmUniswapPositions } from '../../utils/evm.util.js';
 import { findPositions } from '../../utils/positions.util.js';
+import { fetchMeteoraDlmmPositions } from '../../utils/meteora-dlmm.util.js';
 import { fetchPositionRangeData } from '../../utils/range.util.js';
 import { calculateCompleteApr } from '../../utils/apr.util.js';
 import { formatPositionsListMessage, formatErrorMessage, formatLoadingMessage } from '../formatters/message.formatter.js';
@@ -117,12 +118,23 @@ export async function handlePositions(bot, msg, opts = {}) {
             // Connect to Solana
             const connection = createSolanaConnection();
             const startFind = Date.now();
-            // Find all PancakeSwap positions for the wallet
+            // Find all PancakeSwap and Meteora DLMM positions for the wallet
             if (process.env.LOG_LEVEL === 'debug') {
-                console.log('⏱️  Starting findPositions...');
+                console.log('⏱️  Starting findPositions & fetchMeteoraDlmmPositions...');
             }
-            const positions = await findPositions(connection, walletAddress);
-            if (process.env.LOG_LEVEL === 'debug') { console.log('✅ findPositions took', Date.now() - startFind, 'ms');}
+            const [positions, meteoraPositions] = await Promise.all([
+                findPositions(connection, walletAddress).catch(err => {
+                    console.warn('Failed to find PancakeSwap positions:', err.message);
+                    return [];
+                }),
+                fetchMeteoraDlmmPositions(walletAddress, connection).catch(err => {
+                    console.warn('Failed to find Meteora positions:', err.message);
+                    return [];
+                })
+            ]);
+            if (process.env.LOG_LEVEL === 'debug') {
+                console.log('✅ findPositions & fetchMeteora took', Date.now() - startFind, 'ms');
+            }
 
             // Background: Clean up orphaned positions in DB (positions that exist in DB but not on-chain)
             // This runs asynchronously so it doesn't block the UI update
@@ -149,7 +161,7 @@ export async function handlePositions(bot, msg, opts = {}) {
                 }
             })().catch(err => console.error('❌ Orphan cleanup error:', err));
 
-            if (positions.length === 0) {
+            if (positions.length === 0 && meteoraPositions.length === 0) {
                 await bot.editMessageText(
                     await formatPositionsListMessage([]),
                     {
@@ -267,6 +279,7 @@ export async function handlePositions(bot, msg, opts = {}) {
 
                     positionsData.push({
                         ...rangeData,
+                        protocol: 'pancakeswap',
                         aprData,
                         avgAprData, // Add average APR data
                         mintAddress: position.mintAddress,
@@ -286,6 +299,11 @@ export async function handlePositions(bot, msg, opts = {}) {
                     });
                 }
             }
+
+            // Append Meteora DLMM positions
+            for (const mPos of meteoraPositions) {
+                positionsData.push(mPos);
+            }
             
             // Filter positions by selected pool (if any)
             const activePoolLabel = requestedPoolLabel || _selectedPoolLabelByChatId.get(chatId) || null;
@@ -293,9 +311,9 @@ export async function handlePositions(bot, msg, opts = {}) {
                 if (!activePoolLabel) return positionsData;
                 try {
                     return positionsData.filter(p => {
-                        const t0 = getTokenSymbol(p.mint0);
-                        const t1 = getTokenSymbol(p.mint1);
-                        return `${t0}-${t1}` === activePoolLabel;
+                        const t0 = p.token0Symbol || getTokenSymbol(p.mint0);
+                        const t1 = p.token1Symbol || getTokenSymbol(p.mint1);
+                        return `${t0}-${t1}` === activePoolLabel || `${t1}-${t0}` === activePoolLabel;
                     });
                 } catch (_) {
                     return positionsData;
@@ -312,6 +330,23 @@ export async function handlePositions(bot, msg, opts = {}) {
             for (let index = 0; index < filteredPositionsData.length; index++) {
                 const position = filteredPositionsData[index];
                 if (!position.success) continue;
+
+                // Handle Meteora DLMM positions: STRICTLY READ-ONLY
+                if (position.protocol === 'meteora' || position.isReadOnly) {
+                    const meteoraUrl = position.poolUrl || `https://app.meteora.ag/dlmm/${position.poolId}`;
+                    const solscanUrl = `https://solscan.io/account/${position.mintAddress}`;
+                    keyboard.inline_keyboard.push([
+                        {
+                            text: `🪐 View on Meteora #${index + 1}`,
+                            url: meteoraUrl
+                        },
+                        {
+                            text: `🔍 View on Solscan`,
+                            url: solscanUrl
+                        }
+                    ]);
+                    continue;
+                }
 
                 // Persist/update the position so toggles have a position_id
                 try {

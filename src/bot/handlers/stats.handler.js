@@ -11,6 +11,7 @@
 
 import { createSolanaConnection } from '../../utils/rpc.util.js';
 import { findPositions } from '../../utils/positions.util.js';
+import { fetchMeteoraDlmmPositions } from '../../utils/meteora-dlmm.util.js';
 import { fetchPositionRangeData } from '../../utils/range.util.js';
 import { getActiveWallet } from '../../services/wallet.service.js';
 import { getPositionStatistics } from '../../services/position-statistics.service.js';
@@ -63,9 +64,10 @@ function formatDuration(ms) {
  * @returns {string} Formatted message section
  */
 function formatPositionStats(position, stats, rangeData, index, currentSolPrice = null, rewardsData = null) {
+    const isMeteora = position.protocol === 'meteora';
     const poolName = position.token0_symbol && position.token1_symbol
-        ? `${position.token0_symbol}-${position.token1_symbol}`
-        : `Position #${index}`;
+        ? `${position.token0_symbol}-${position.token1_symbol}${isMeteora ? ' (Meteora DLMM)' : ''}`
+        : `Position #${index}${isMeteora ? ' (Meteora DLMM)' : ''}`;
     
     let message = `📊 *Stats: ${poolName}* (#${index})\n\n`;
     
@@ -94,14 +96,18 @@ function formatPositionStats(position, stats, rangeData, index, currentSolPrice 
     const statusText = inRange ? 'In Range' : 'Out of Range';
     message += `📍 *Status:* ${statusEmoji} ${statusText}\n\n`;
     
-    // Rebalance stats
-    const rebalancesTotal = stats.rebalances_count_lifetime || 0;
-    const rebalancesToday = stats.rebalances_today || 0;
-    message += `⚖️ *Rebalances:* ${rebalancesTotal} total | ${rebalancesToday} today\n`;
-    
-    // Costs
-    const totalCost = stats.total_rebalance_cost_usd || 0;
-    message += `💸 *Cost:* ${formatCurrency(totalCost)}\n`;
+    if (isMeteora) {
+        message += `⚖️ *Rebalances:* Read-only\n`;
+    } else {
+        // Rebalance stats
+        const rebalancesTotal = stats.rebalances_count_lifetime || 0;
+        const rebalancesToday = stats.rebalances_today || 0;
+        message += `⚖️ *Rebalances:* ${rebalancesTotal} total | ${rebalancesToday} today\n`;
+        
+        // Costs
+        const totalCost = stats.total_rebalance_cost_usd || 0;
+        message += `💸 *Cost:* ${formatCurrency(totalCost)}\n`;
+    }
     
     // Pending Rewards section
     if (rewardsData && rewardsData.transfers && rewardsData.transfers.length > 0) {
@@ -268,10 +274,19 @@ export async function handleStats(bot, msg) {
             // Connect to Solana
             const connection = createSolanaConnection();
 
-            // Find all positions for the wallet
-            const positions = await findPositions(connection, walletAddress);
+            // Find all positions for the wallet (PancakeSwap + Meteora DLMM)
+            const [positions, meteoraPositions] = await Promise.all([
+                findPositions(connection, walletAddress).catch(err => {
+                    console.warn('findPositions error:', err.message);
+                    return [];
+                }),
+                fetchMeteoraDlmmPositions(walletAddress, connection).catch(err => {
+                    console.warn('fetchMeteoraDlmmPositions error:', err.message);
+                    return [];
+                })
+            ]);
 
-            if (positions.length === 0) {
+            if (positions.length === 0 && meteoraPositions.length === 0) {
                 await bot.editMessageText(
                     `📊 *Position Statistics*\n\n` +
                     `No positions found for this wallet.\n\n` +
@@ -297,6 +312,7 @@ export async function handleStats(bot, msg) {
             // Process each position
             const messages = [];
 
+            // Process PancakeSwap positions
             for (let i = 0; i < positions.length; i++) {
                 const position = positions[i];
                 
@@ -377,6 +393,84 @@ export async function handleStats(bot, msg) {
                 } catch (error) {
                     console.error(`Error processing position ${position.mintAddress}:`, error);
                     messages.push(`📊 *Position #${i + 1}*\n\n❌ Error: ${error.message}`);
+                }
+            }
+
+            // Process Meteora DLMM positions
+            for (let i = 0; i < meteoraPositions.length; i++) {
+                const mPos = meteoraPositions[i];
+                const displayIndex = positions.length + i + 1;
+
+                try {
+                    // Get position from DB
+                    const dbPositions = await db.select()
+                        .from(positionsTable)
+                        .where(eq(positionsTable.nft_mint, mPos.mintAddress))
+                        .limit(1);
+
+                    const dbPosition = dbPositions[0] || {
+                        token0_symbol: mPos.token0Symbol,
+                        token1_symbol: mPos.token1Symbol,
+                        token0_mint: mPos.mint0,
+                        token1_mint: mPos.mint1,
+                    };
+                    dbPosition.protocol = 'meteora';
+
+                    const stats = dbPositions[0] ? await getPositionStatistics(dbPositions[0].id) : null;
+
+                    // Group claimable fee data for rewards section
+                    const transfers = [];
+                    const tokenPrices = {};
+                    if (mPos.unclaimedFeeToken0 > 0) {
+                        transfers.push({
+                            token: mPos.mint0,
+                            uiAmount: mPos.unclaimedFeeToken0,
+                            decimals: 8
+                        });
+                        const priceUsd = (mPos.unclaimedFeeToken0 > 0 && mPos.unclaimedFeeToken0Usd)
+                            ? (mPos.unclaimedFeeToken0Usd / mPos.unclaimedFeeToken0).toString()
+                            : null;
+                        tokenPrices[mPos.mint0] = {
+                            ticker: mPos.token0Symbol,
+                            priceUsd
+                        };
+                    }
+                    if (mPos.unclaimedFeeToken1 > 0) {
+                        transfers.push({
+                            token: mPos.mint1,
+                            uiAmount: mPos.unclaimedFeeToken1,
+                            decimals: 6
+                        });
+                        const priceUsd = (mPos.unclaimedFeeToken1 > 0 && mPos.unclaimedFeeToken1Usd)
+                            ? (mPos.unclaimedFeeToken1Usd / mPos.unclaimedFeeToken1).toString()
+                            : null;
+                        tokenPrices[mPos.mint1] = {
+                            ticker: mPos.token1Symbol,
+                            priceUsd
+                        };
+                    }
+
+                    const rewardsData = transfers.length > 0 ? {
+                        transfers,
+                        tokenPrices,
+                        totalUsd: mPos.unclaimedFeesUsd || 0
+                    } : null;
+
+                    const rangeData = {
+                        inRange: mPos.inRange,
+                        liquidityValueUsd: mPos.liquidityValueUsd,
+                        amount0Human: mPos.amount0Human,
+                        amount1Human: mPos.amount1Human,
+                        token0PriceUsd: mPos.amount0Human > 0 && mPos.amount0Usd ? (mPos.amount0Usd / mPos.amount0Human) : null,
+                        token1PriceUsd: mPos.amount1Human > 0 && mPos.amount1Usd ? (mPos.amount1Usd / mPos.amount1Human) : null
+                    };
+
+                    const message = formatPositionStats(dbPosition, stats, rangeData, displayIndex, currentSolPrice, rewardsData);
+                    messages.push(message);
+
+                } catch (error) {
+                    console.error(`Error processing Meteora position ${mPos.mintAddress}:`, error);
+                    messages.push(`📊 *Position #${displayIndex}*\n\n❌ Error: ${error.message}`);
                 }
             }
 

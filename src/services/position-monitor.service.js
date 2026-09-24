@@ -36,6 +36,7 @@ export class PositionMonitorService {
         this.emitProximity = options.emitProximity ?? false; // off by default until scheduler handles it
         this.coder = new BorshCoder(PANCAKESWAP_IDL);
         this.meteoraCoder = new BorshCoder(METEORA_IDL);
+        this.meteoraPoolAddresses = new Set();
         this.lastCheckTime = null; // Track last check time for accumulated time calculations
     }
 
@@ -64,6 +65,7 @@ export class PositionMonitorService {
         const cycleIntervalMs = this.lastCheckTime ? (now - this.lastCheckTime) : 0;
         this.lastCheckTime = now;
         for (const pos of activePositions) {
+            const isMeteora = this.meteoraPoolAddresses?.has(pos.pool_address) || false;
             const currentPrice = poolPriceMap.get(pos.pool_address);
             if (typeof currentPrice !== 'number' || !isFinite(currentPrice)) {
                 if (process.env.LOG_LEVEL === 'debug') {
@@ -130,7 +132,8 @@ export class PositionMonitorService {
                         lowerPrice: hasLower ? pos.lower_price : null,
                         upperPrice: hasUpper ? pos.upper_price : null,
                         currentPrice,
-                        type: 'back_in_range'
+                        type: 'back_in_range',
+                        isMeteora
                     });
                 }
 
@@ -172,7 +175,8 @@ export class PositionMonitorService {
                                         currentPrice,
                                         type: 'proximity',
                                         lowerAlertPrice: prox.lower_alert_price,
-                                        upperAlertPrice: prox.upper_alert_price
+                                        upperAlertPrice: prox.upper_alert_price,
+                                        isMeteora
                                     });
                                 }
                             }
@@ -206,7 +210,8 @@ export class PositionMonitorService {
                     upperPrice: hasUpper ? pos.upper_price : null,
                     currentPrice,
                     type: 'out_of_range',
-                    direction: outBelow ? 'below' : 'above'
+                    direction: outBelow ? 'below' : 'above',
+                    isMeteora
                 });
             }
         }
@@ -314,6 +319,7 @@ export class PositionMonitorService {
 
         // Support Meteora DLMM pools
         if (ai.owner.equals(METEORA_PROGRAM_ID)) {
+            this.meteoraPoolAddresses.add(poolAddress);
             const pairData = this.meteoraCoder.accounts.decode('LbPair', ai.data);
             const [dec0Maybe, dec1Maybe] = await Promise.all([
                 getMintDecimals(this.connection, pairData.token_x_mint),

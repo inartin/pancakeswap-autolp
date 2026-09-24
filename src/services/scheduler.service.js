@@ -211,7 +211,18 @@ export function startMonitoring(bot, options = {}) {
                 const baseOptions = { parse_mode: 'Markdown', disable_web_page_preview: true };
                 let messageOptions = baseOptions;
                 
-                if (t.type === 'proximity' || t.type === 'out_of_range') {
+                if (t.isMeteora) {
+                    const poolUrl = t.poolAddress ? `https://app.meteora.ag/dlmm/${t.poolAddress}` : null;
+                    const keyboard = [];
+                    if (poolUrl) {
+                        keyboard.push([{ text: '🪐 View on Meteora', url: poolUrl }]);
+                    }
+                    keyboard.push([{ text: '📊 View Positions', callback_data: 'positions' }]);
+                    messageOptions = {
+                        ...baseOptions,
+                        reply_markup: { inline_keyboard: keyboard }
+                    };
+                } else if (t.type === 'proximity' || t.type === 'out_of_range') {
                     // Use previously fetched position to get NFT mint
                     const nftMint = position?.nft_mint;
                     const canRebalance = position?.range_percent && nftMint;

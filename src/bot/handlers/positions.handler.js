@@ -381,6 +381,8 @@ export async function handlePositions(bot, msg, opts = {}) {
                 if (position.protocol === 'meteora' || position.isReadOnly) {
                     const meteoraUrl = position.poolUrl || `https://app.meteora.ag/dlmm/${position.poolId}`;
                     const solscanUrl = `https://solscan.io/account/${position.mintAddress}`;
+
+                    // Row 1: External Links
                     keyboard.inline_keyboard.push([
                         {
                             text: `🪐 View on Meteora #${index + 1}`,
@@ -391,6 +393,44 @@ export async function handlePositions(bot, msg, opts = {}) {
                             url: solscanUrl
                         }
                     ]);
+
+                    // Row 2: Alerts and Stats buttons (matching PancakeSwap positions)
+                    let posId = position.positionId;
+                    if (!posId) {
+                        try {
+                            const existing = await db.select({ id: positionsTable.id })
+                                .from(positionsTable)
+                                .where(eq(positionsTable.nft_mint, position.mintAddress))
+                                .limit(1);
+                            if (existing?.[0]?.id) {
+                                posId = existing[0].id;
+                                position.positionId = posId;
+                            }
+                        } catch (_) {}
+                    }
+
+                    let outRangeEnabled = true;
+                    if (posId) {
+                        try {
+                            const cfg = await ensureProximityRow(posId);
+                            outRangeEnabled = cfg?.out_of_range_enabled !== 0 && cfg?.out_of_range_enabled !== false;
+                        } catch (e) {
+                            console.warn('ensureProximityRow error for Meteora:', e?.message || e);
+                        }
+                    }
+                    const alertsLabel = outRangeEnabled ? OUT_RANGE_ALERT_ON : OUT_RANGE_ALERT_OFF;
+
+                    keyboard.inline_keyboard.push([
+                        {
+                            text: alertsLabel,
+                            callback_data: `toggle_alerts_${position.mintAddress}`
+                        },
+                        {
+                            text: `📊 Stats`,
+                            callback_data: `stats`
+                        }
+                    ]);
+
                     continue;
                 }
 

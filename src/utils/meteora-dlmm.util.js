@@ -67,11 +67,15 @@ export async function fetchMeteoraDlmmPositions(walletAddress, connection = null
                     const fee1Usd = parseFloat(pos.unrealizedPnl?.unclaimedFeeTokenY?.usd || 0);
                     const totalUnclaimedUsd = fee0Usd + fee1Usd;
 
-                    const feePerTvl24h = parseFloat(pos.feePerTvl24h || 0);
+                    const feePerTvl24h = parseFloat(pos.feePerTvl24h || 0); // e.g. 0.321532% per 24h
                     const positionValueUsd = pos.unrealizedPnl?.balances || 0;
-                    const estDayUsd = positionValueUsd * feePerTvl24h;
+                    const inRange = !pos.isOutOfRange;
+
+                    // feePerTvl24h is in percent (% per 24h). Convert % to daily factor (/ 100).
+                    const estDayUsd = inRange ? positionValueUsd * (feePerTvl24h / 100) : 0;
                     const estHourUsd = estDayUsd / 24;
-                    const aprPercent = feePerTvl24h * 365 * 100;
+                    // Annualized APR is daily percentage * 365
+                    const aprPercent = inRange ? feePerTvl24h * 365 : 0;
 
                     positionsList.push({
                         protocol: 'meteora',

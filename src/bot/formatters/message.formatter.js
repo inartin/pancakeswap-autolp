@@ -51,160 +51,182 @@ export function formatRewardsMessage(walletAddress, positionsData, claimedSinceR
         return `❌ *No Positions Found*\n\nNo PancakeSwap or Meteora DLMM positions detected for this wallet.\n\n*Make sure:*\n• Wallet has active liquidity positions\n• Positions are on Solana mainnet\n\n*Create a position:*\n• Visit [PancakeSwap](https://pancakeswap.finance)\n• Visit [Meteora](https://app.meteora.ag)\n\nTry again: /rewards`;
     }
 
+    // Helper functions to check out of range & rewards
+    const isPosOutOfRange = (pos) => pos.inRange === false || pos.isOutOfRange === true;
+    const posHasRewards = (pos) => {
+        if (pos.protocol === 'meteora') {
+            return (pos.unclaimedFeesUsd > 0) || (pos.unclaimedFeeToken0 > 0) || (pos.unclaimedFeeToken1 > 0);
+        }
+        return Boolean(pos.transfers && pos.transfers.some(t => parseFloat(t.uiAmount) > 0));
+    };
+
+    // Calculate Meteora all-time fees across all positions in wallet
+    const meteoraAllTimeFees = positionsData
+        .filter(p => p.protocol === 'meteora')
+        .reduce((sum, p) => sum + (parseFloat(p.allTimeFeesUsd) || 0), 0);
+
+    // Filter out positions that are out of range and have no rewards
+    const visiblePositions = positionsData.filter(pos => !(isPosOutOfRange(pos) && !posHasRewards(pos)));
+
     let message = `💰 *Claimable Rewards*\n\n`;
     let totalValueUsd = 0;
 
-    positionsData.forEach((position, index) => {
-        // Handle Meteora DLMM position (read-only)
-        if (position.protocol === 'meteora') {
-            const positionLabel = `🪐 [Meteora DLMM #${index + 1}](${position.poolUrl || `https://app.meteora.ag/dlmm/${position.poolId}`})`;
-            message += `${positionLabel}  *${position.token0Symbol}/${position.token1Symbol}*\n`;
+    if (visiblePositions.length === 0) {
+        message += `No claimable rewards found.\n\n`;
+    } else {
+        visiblePositions.forEach((position, index) => {
+            // Handle Meteora DLMM position (read-only)
+            if (position.protocol === 'meteora') {
+                const positionLabel = `🪐 [Meteora DLMM #${index + 1}](${position.poolUrl || `https://app.meteora.ag/dlmm/${position.poolId}`})`;
+                message += `${positionLabel}  *${position.token0Symbol}/${position.token1Symbol}*\n`;
 
-            const hasClaimable = (position.unclaimedFeesUsd > 0) || (position.unclaimedFeeToken0 > 0) || (position.unclaimedFeeToken1 > 0);
-            if (hasClaimable) {
-                totalValueUsd += (position.unclaimedFeesUsd || 0);
-                message += `💰 Claimable: *${formatCurrency(position.unclaimedFeesUsd || 0)}*\n`;
-                if (position.unclaimedFeeToken0 > 0) {
-                    message += `   • ${formatDecimal(position.unclaimedFeeToken0, 'auto')} ${position.token0Symbol}`;
-                    if (position.unclaimedFeeToken0Usd > 0) message += ` (${formatCurrency(position.unclaimedFeeToken0Usd)})`;
-                    message += `\n`;
+                const hasClaimable = (position.unclaimedFeesUsd > 0) || (position.unclaimedFeeToken0 > 0) || (position.unclaimedFeeToken1 > 0);
+                if (hasClaimable) {
+                    totalValueUsd += (position.unclaimedFeesUsd || 0);
+                    message += `💰 Claimable: *${formatCurrency(position.unclaimedFeesUsd || 0)}*\n`;
+                    if (position.unclaimedFeeToken0 > 0) {
+                        message += `   • ${formatDecimal(position.unclaimedFeeToken0, 'auto')} ${position.token0Symbol}`;
+                        if (position.unclaimedFeeToken0Usd > 0) message += ` (${formatCurrency(position.unclaimedFeeToken0Usd)})`;
+                        message += `\n`;
+                    }
+                    if (position.unclaimedFeeToken1 > 0) {
+                        message += `   • ${formatDecimal(position.unclaimedFeeToken1, 'auto')} ${position.token1Symbol}`;
+                        if (position.unclaimedFeeToken1Usd > 0) message += ` (${formatCurrency(position.unclaimedFeeToken1Usd)})`;
+                        message += `\n`;
+                    }
+                    message += `🔒 _Read-only (Claim via Meteora App)_\n\n`;
+                } else {
+                    message += `No claimable rewards\n🔒 _Read-only_\n\n`;
                 }
-                if (position.unclaimedFeeToken1 > 0) {
-                    message += `   • ${formatDecimal(position.unclaimedFeeToken1, 'auto')} ${position.token1Symbol}`;
-                    if (position.unclaimedFeeToken1Usd > 0) message += ` (${formatCurrency(position.unclaimedFeeToken1Usd)})`;
-                    message += `\n`;
+
+                if (index < visiblePositions.length - 1) {
+                    message += `${LINE_DIVIDER}\n\n`;
                 }
-                message += `🔒 _Read-only (Claim via Meteora App)_\n\n`;
-            } else {
-                message += `No claimable rewards\n🔒 _Read-only_\n\n`;
+                return;
+            }
+            // Create clickable PancakeSwap link if pool state is available
+            const positionLabel = position.poolState && position.mintAddress
+                ? `[LP #${index + 1}](https://pancakeswap.finance/liquidity/position/v3/solana/${position.poolState}/${position.mintAddress}?chain=sol&persistChain=1)`
+                : `*LP #${index + 1}*`;
+
+            message += `${positionLabel}`;
+
+            // Try to construct pool name from available data
+            const poolTokens = [];
+            const tokenGroups = {};
+
+            if (position.transfers && position.transfers.length > 0) {
+                // Group transfers by token
+                position.transfers.forEach(transfer => {
+                    if (!tokenGroups[transfer.token]) {
+                        tokenGroups[transfer.token] = {
+                            token: transfer.token,
+                            totalAmount: 0,
+                            decimals: transfer.decimals,
+                            transfers: []
+                        };
+                    }
+                    tokenGroups[transfer.token].totalAmount += parseFloat(transfer.uiAmount);
+                    tokenGroups[transfer.token].transfers.push(transfer);
+                });
+
+                // Collect token symbols for pool name
+                Object.values(tokenGroups).forEach(group => {
+                    const priceData = position.tokenPrices?.[group.token];
+                    if (priceData?.ticker) {
+                        poolTokens.push(priceData.ticker.toUpperCase());
+                    }
+                });
             }
 
-            if (index < positionsData.length - 1) {
-                message += `${LINE_DIVIDER}\n\n`;
-            }
-            return;
-        }
-        // Create clickable PancakeSwap link if pool state is available
-        const positionLabel = position.poolState && position.mintAddress
-            ? `[LP #${index + 1}](https://pancakeswap.finance/liquidity/position/v3/solana/${position.poolState}/${position.mintAddress}?chain=sol&persistChain=1)`
-            : `*LP #${index + 1}*`;
-
-        message += `${positionLabel}`;
-
-        // Try to construct pool name from available data
-        const poolTokens = [];
-        const tokenGroups = {};
-
-        if (position.transfers && position.transfers.length > 0) {
-            // Group transfers by token
-            position.transfers.forEach(transfer => {
-                if (!tokenGroups[transfer.token]) {
-                    tokenGroups[transfer.token] = {
-                        token: transfer.token,
-                        totalAmount: 0,
-                        decimals: transfer.decimals,
-                        transfers: []
-                    };
-                }
-                tokenGroups[transfer.token].totalAmount += parseFloat(transfer.uiAmount);
-                tokenGroups[transfer.token].transfers.push(transfer);
-            });
-
-            // Collect token symbols for pool name
-            Object.values(tokenGroups).forEach(group => {
-                const priceData = position.tokenPrices?.[group.token];
-                if (priceData?.ticker) {
-                    poolTokens.push(priceData.ticker.toUpperCase());
-                }
-            });
-        }
-
-        // Prefer pool tickers from handler (accurate pair), fall back to transfer-derived
-        if (position.mint0Ticker && position.mint1Ticker) {
-            message += `  *${position.mint0Ticker}/${position.mint1Ticker}*`;
-        } else if (poolTokens.length >= 2) {
-            message += `  *${poolTokens[0]}/${poolTokens[1]}*`;
-        } else if (poolTokens.length === 1) {
-            message += `  *${poolTokens[0]}*`;
-        }
-
-        // // Display liquidity value if available, otherwise show mint address
-        // if (position.liquidityValueUsd && position.liquidityValueUsd > 0) {
-        //     message += ` (${formatCurrency(position.liquidityValueUsd)})\n\n`;
-        // } else {
-        //     message += `\`${formatShortAddress(position.mintAddress)}\`\n\n`;
-        // }
-
-        if (position.error) {
-            message += `❌ Error: ${position.error}\n\n`;
-            if (index < positionsData.length - 1) {
-                message += `${LINE_DIVIDER}\n\n`;
-            }
-            return;
-        }
-
-        if (!position.transfers || position.transfers.length === 0) {
-            message += `No claimable rewards\n\n`;
-            if (index < positionsData.length - 1) {
-                message += `${LINE_DIVIDER}\n\n`;
-            }
-            return;
-        }
-
-        // Calculate position total value first
-        let positionValueUsd = 0;
-        Object.values(tokenGroups).forEach(group => {
-            const priceData = position.tokenPrices?.[group.token];
-            const priceUsd = priceData?.priceUsd ? parseFloat(priceData.priceUsd) : 0;
-            const valueUsd = group.totalAmount * priceUsd;
-
-            if (priceUsd > 0) {
-                positionValueUsd += valueUsd;
-            }
-        });
-
-        // // Display header with position total
-        // message += `*Pending Rewards* (${formatCurrency(positionValueUsd)}):\n`;
-        // // Display individual tokens
-        Object.values(tokenGroups).forEach(group => {
-            const priceData = position.tokenPrices?.[group.token];
-            // const ticker = priceData?.ticker || 'Unknown';
-            const priceUsd = priceData?.priceUsd ? parseFloat(priceData.priceUsd) : 0;
-            const valueUsd = group.totalAmount * priceUsd;
-
-            if (priceUsd > 0) {
-                totalValueUsd += valueUsd;
+            // Prefer pool tickers from handler (accurate pair), fall back to transfer-derived
+            if (position.mint0Ticker && position.mint1Ticker) {
+                message += `  *${position.mint0Ticker}/${position.mint1Ticker}*`;
+            } else if (poolTokens.length >= 2) {
+                message += `  *${poolTokens[0]}/${poolTokens[1]}*`;
+            } else if (poolTokens.length === 1) {
+                message += `  *${poolTokens[0]}*`;
             }
 
-            // message += `• ${formatDecimal(group.totalAmount, 'auto')} ${ticker.toUpperCase()}`;
-
-            // if (priceUsd > 0) {
-            //     message += ` - ${formatCurrency(valueUsd)}`;
+            // // Display liquidity value if available, otherwise show mint address
+            // if (position.liquidityValueUsd && position.liquidityValueUsd > 0) {
+            //     message += ` (${formatCurrency(position.liquidityValueUsd)})\n\n`;
+            // } else {
+            //     message += `\`${formatShortAddress(position.mintAddress)}\`\n\n`;
             // }
 
+            if (position.error) {
+                message += `❌ Error: ${position.error}\n\n`;
+                if (index < visiblePositions.length - 1) {
+                    message += `${LINE_DIVIDER}\n\n`;
+                }
+                return;
+            }
+
+            if (!position.transfers || position.transfers.length === 0) {
+                message += `No claimable rewards\n\n`;
+                if (index < visiblePositions.length - 1) {
+                    message += `${LINE_DIVIDER}\n\n`;
+                }
+                return;
+            }
+
+            // Calculate position total value first
+            let positionValueUsd = 0;
+            Object.values(tokenGroups).forEach(group => {
+                const priceData = position.tokenPrices?.[group.token];
+                const priceUsd = priceData?.priceUsd ? parseFloat(priceData.priceUsd) : 0;
+                const valueUsd = group.totalAmount * priceUsd;
+
+                if (priceUsd > 0) {
+                    positionValueUsd += valueUsd;
+                }
+            });
+
+            // // Display header with position total
+            // message += `*Pending Rewards* (${formatCurrency(positionValueUsd)}):\n`;
+            // // Display individual tokens
+            Object.values(tokenGroups).forEach(group => {
+                const priceData = position.tokenPrices?.[group.token];
+                // const ticker = priceData?.ticker || 'Unknown';
+                const priceUsd = priceData?.priceUsd ? parseFloat(priceData.priceUsd) : 0;
+                const valueUsd = group.totalAmount * priceUsd;
+
+                if (priceUsd > 0) {
+                    totalValueUsd += valueUsd;
+                }
+
+                // message += `• ${formatDecimal(group.totalAmount, 'auto')} ${ticker.toUpperCase()}`;
+
+                // if (priceUsd > 0) {
+                //     message += ` - ${formatCurrency(valueUsd)}`;
+                // }
+
+                // message += `\n`;
+            });
+
             // message += `\n`;
+
+            // Add separator between positions (except after last one)
+            if (index < visiblePositions.length - 1) {
+                message += `${LINE_DIVIDER}\n\n`;
+            }
         });
-
-        // message += `\n`;
-
-        // Add separator between positions (except after last one)
-        if (index < positionsData.length - 1) {
-            message += `${LINE_DIVIDER}\n\n`;
-        }
-    });
+    }
 
     message += `\n\n*💵 Pending Rewards:* *${formatCurrency(totalValueUsd)}*\n`;
 
-    // Show claimed since last reset if available
-    if (claimedSinceReset !== null && claimedSinceReset !== undefined) {
+    // Show claimed since last reset if available, adding Meteora all-time fees earned
+    const totalClaimed = (claimedSinceReset !== null && claimedSinceReset !== undefined ? claimedSinceReset : 0) + meteoraAllTimeFees;
+    if (claimedSinceReset !== null && claimedSinceReset !== undefined || meteoraAllTimeFees > 0) {
         message += `\n*🧾 Statistics*`;
         if (splitStrategy) {
-            const claimedOut = claimedSinceReset * SPLIT_CLAIM_PERCENT;
-            const compounded = claimedSinceReset * SPLIT_KEEP_PERCENT;
+            const claimedOut = totalClaimed * SPLIT_CLAIM_PERCENT;
+            const compounded = totalClaimed * SPLIT_KEEP_PERCENT;
             message += `\n*Claimed:* ${formatCurrency(claimedOut)}\n`;
             message += `\n*Compounded:* ${formatCurrency(compounded)}\n`;
         } else {
-            message += `\n*Claimed:* ${formatCurrency(claimedSinceReset)}\n`;
+            message += `\n*Claimed:* ${formatCurrency(totalClaimed)}\n`;
         }
     }
 
@@ -411,24 +433,7 @@ export async function formatPositionsListMessage(positionsData) {
         const visualization = formatPositionVisualization(position);
         message += `\n${visualization}\n`;
 
-        // Display Meteora claimable fees and stats
         if (isMeteora) {
-            message += `\n💰 *Claimable Fees:* ${formatCurrency(position.unclaimedFeesUsd || 0)}\n`;
-            if ((position.unclaimedFeeToken0 > 0) || (position.unclaimedFeeToken1 > 0)) {
-                if (position.unclaimedFeeToken0 > 0) {
-                    message += `   • ${formatDecimal(position.unclaimedFeeToken0, 'auto')} ${token0Symbol}`;
-                    if (position.unclaimedFeeToken0Usd > 0) message += ` (${formatCurrency(position.unclaimedFeeToken0Usd)})`;
-                    message += `\n`;
-                }
-                if (position.unclaimedFeeToken1 > 0) {
-                    message += `   • ${formatDecimal(position.unclaimedFeeToken1, 'auto')} ${token1Symbol}`;
-                    if (position.unclaimedFeeToken1Usd > 0) message += ` (${formatCurrency(position.unclaimedFeeToken1Usd)})`;
-                    message += `\n`;
-                }
-            }
-            if (position.allTimeFeesUsd > 0 || position.allTimeFeesToken0 > 0 || position.allTimeFeesToken1 > 0) {
-                message += `🧾 *All-Time Fees Earned:* ${formatCurrency(position.allTimeFeesUsd || 0)}\n`;
-            }
             if (position.amount0Human != null && position.amount1Human != null) {
                 message += `\n💎 *Liquidity:*\n`;
                 message += `   ${formatDecimal(position.amount0Human, 'auto')} ${token0Symbol} | ${formatDecimal(position.amount1Human, 'auto')} ${token1Symbol}\n`;

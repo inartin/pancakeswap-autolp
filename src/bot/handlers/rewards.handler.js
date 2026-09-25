@@ -141,6 +141,15 @@ export async function handleRewards(bot, msg) {
                 let mint0 = accounts.poolData?.tokenMint0 || null;
                 let mint1 = accounts.poolData?.tokenMint1 || null;
 
+                // Calculate in-range status using Uniswap V3 tick data
+                let inRange = true;
+                if (accounts.poolData?.tickCurrent != null &&
+                    accounts.positionData?.tickLowerIndex != null &&
+                    accounts.positionData?.tickUpperIndex != null) {
+                    inRange = accounts.poolData.tickCurrent >= accounts.positionData.tickLowerIndex &&
+                              accounts.poolData.tickCurrent <= accounts.positionData.tickUpperIndex;
+                }
+
                 positionsData.push({
                     mintAddress: position.mintAddress,
                     positionPda: position.positionPda,
@@ -151,6 +160,7 @@ export async function handleRewards(bot, msg) {
                     mint1,
                     mint0Ticker,
                     mint1Ticker,
+                    inRange,
                     success: true
                 });
 
@@ -212,8 +222,18 @@ export async function handleRewards(bot, msg) {
             inline_keyboard: []
         };
 
-        // Add claim and compound buttons for each position that has rewards
-        positionsData.forEach((position, index) => {
+        // Filter out positions that are out of range and have no rewards (to match rewards message)
+        const isPosOutOfRange = (pos) => pos.inRange === false || pos.isOutOfRange === true;
+        const posHasRewards = (pos) => {
+            if (pos.protocol === 'meteora') {
+                return (pos.unclaimedFeesUsd > 0) || (pos.unclaimedFeeToken0 > 0) || (pos.unclaimedFeeToken1 > 0);
+            }
+            return Boolean(pos.transfers && pos.transfers.some(t => parseFloat(t.uiAmount) > 0));
+        };
+        const visiblePositions = positionsData.filter(pos => !(isPosOutOfRange(pos) && !posHasRewards(pos)));
+
+        // Add claim and compound buttons for each visible position that has rewards
+        visiblePositions.forEach((position, index) => {
             // Read-only Meteora DLMM: add view link instead of write actions
             if (position.protocol === 'meteora' || position.isReadOnly) {
                 if (position.unclaimedFeesUsd > 0 || position.unclaimedFeeToken0 > 0 || position.unclaimedFeeToken1 > 0) {

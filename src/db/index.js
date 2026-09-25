@@ -51,8 +51,23 @@ function initializeDatabase() {
 
         console.log('✅ Database migrations applied successfully');
     } catch (error) {
-        console.error('❌ Migration failed:', error.message);
-        throw error;
+        if (error.cause?.code === 'SQLITE_ERROR' && error.cause?.message?.includes('duplicate column')) {
+            console.log('⚠️  Migration skipped (column already exists)');
+        } else {
+            console.error('❌ Migration failed:', error.message);
+            throw error;
+        }
+    }
+
+    // Ensure positions table has is_hidden column
+    try {
+        const positionsCols = sqlite.prepare("PRAGMA table_info(positions)").all();
+        if (!positionsCols.some(c => c.name === 'is_hidden')) {
+            sqlite.exec("ALTER TABLE positions ADD COLUMN is_hidden INTEGER DEFAULT 0 NOT NULL");
+            console.log('✅ Added is_hidden column to positions table');
+        }
+    } catch (colErr) {
+        console.warn('⚠️ Column check for is_hidden:', colErr.message);
     }
 }
 

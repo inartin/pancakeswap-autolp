@@ -16,7 +16,7 @@ import { fetchPositionRangeData } from '../../utils/range.util.js';
 import { calculateCompleteApr } from '../../utils/apr.util.js';
 import { formatPositionsListMessage, formatErrorMessage, formatLoadingMessage } from '../formatters/message.formatter.js';
 import { getActiveWallet, getActiveWalletWithEncryption } from '../../services/wallet.service.js';
-import { upsertPosition, updatePositionStatus, getWalletPositions } from '../../services/position.service.js';
+import { upsertPosition, updatePositionStatus, getWalletPositions, togglePositionHidden } from '../../services/position.service.js';
 import { removeLiquidity } from '../../utils/remove-liquidity.util.js';
 import { decryptPrivateKey } from '../../utils/encryption.util.js';
 import { formatCurrency, getPancakeSwapPositionUrl, formatTokenAmount } from '../../utils/format.util.js';
@@ -38,6 +38,9 @@ const PROXIMITY_OFF = '🎚️ Proximity OFF';
 
 // Track selected pool label per chat so refresh keeps the filter
 const _selectedPoolLabelByChatId = new Map();
+
+// Track cached positions data per chat for fast in-place toggling
+const _lastPositionsDataByChatId = new Map();
 
 export function clearSelectedPoolFilter(chatId) {
     try {
@@ -202,6 +205,7 @@ export async function handlePositions(bot, msg, opts = {}) {
                     let rangePercent = null;
                     let statistics = null;
                     let positionId = null;
+                    let isHidden = false;
                     try {
                         const existingPosition = await db.select()
                             .from(positionsTable)
@@ -211,6 +215,7 @@ export async function handlePositions(bot, msg, opts = {}) {
                         if (existingPosition.length > 0) {
                             rangePercent = existingPosition[0].range_percent;
                             positionId = existingPosition[0].id;
+                            isHidden = !!existingPosition[0].is_hidden;
                             
                             // Fetch statistics for this position
                             try {
@@ -290,6 +295,7 @@ export async function handlePositions(bot, msg, opts = {}) {
                         range_percent: rangePercent,
                         statistics: statistics, // Add statistics to position data
                         positionId: positionId, // Add database position ID
+                        is_hidden: isHidden,
                         success: true
                     });
 
@@ -307,6 +313,7 @@ export async function handlePositions(bot, msg, opts = {}) {
             for (const mPos of meteoraPositions) {
                 let statistics = null;
                 let positionId = null;
+                let isHidden = false;
 
                 try {
                     const saved = await upsertPosition({
@@ -329,6 +336,7 @@ export async function handlePositions(bot, msg, opts = {}) {
                     });
 
                     positionId = saved.id;
+                    isHidden = !!saved.is_hidden;
                     statistics = await getPositionStatistics(saved.id);
 
                     // Seed initial time in range from createdAt if statistics is fresh (0 ms accumulated)
@@ -347,7 +355,8 @@ export async function handlePositions(bot, msg, opts = {}) {
                 positionsData.push({
                     ...mPos,
                     statistics,
-                    positionId
+                    positionId,
+                    is_hidden: isHidden
                 });
             }
             
@@ -369,176 +378,15 @@ export async function handlePositions(bot, msg, opts = {}) {
             // Format and send the results
             const message = await formatPositionsListMessage(filteredPositionsData);
 
-            // Create inline keyboard with per-position action buttons (no pool row inside message)
-            const keyboard = { inline_keyboard: [] };
+            // Create inline keyboard with per-position action buttons
+            const keyboard = await buildPositionsInlineKeyboard(filteredPositionsData, wallet);
 
-            // Build buttons per position with persisted DB rows and config
-            for (let index = 0; index < filteredPositionsData.length; index++) {
-                const position = filteredPositionsData[index];
-                if (!position.success) continue;
-
-                // Handle Meteora DLMM positions: STRICTLY READ-ONLY
-                if (position.protocol === 'meteora' || position.isReadOnly) {
-                    const meteoraUrl = position.poolUrl || `https://app.meteora.ag/dlmm/${position.poolId}`;
-                    const solscanUrl = `https://solscan.io/account/${position.mintAddress}`;
-
-                    // Row 1: External Links
-                    keyboard.inline_keyboard.push([
-                        {
-                            text: `🪐 View on Meteora #${index + 1}`,
-                            url: meteoraUrl
-                        },
-                        {
-                            text: `🔍 View on Solscan`,
-                            url: solscanUrl
-                        }
-                    ]);
-
-                    // Row 2: Alerts and Stats buttons (matching PancakeSwap positions)
-                    let posId = position.positionId;
-                    if (!posId) {
-                        try {
-                            const existing = await db.select({ id: positionsTable.id })
-                                .from(positionsTable)
-                                .where(eq(positionsTable.nft_mint, position.mintAddress))
-                                .limit(1);
-                            if (existing?.[0]?.id) {
-                                posId = existing[0].id;
-                                position.positionId = posId;
-                            }
-                        } catch (_) {}
-                    }
-
-                    let outRangeEnabled = true;
-                    if (posId) {
-                        try {
-                            const cfg = await ensureProximityRow(posId);
-                            outRangeEnabled = cfg?.out_of_range_enabled !== 0 && cfg?.out_of_range_enabled !== false;
-                        } catch (e) {
-                            console.warn('ensureProximityRow error for Meteora:', e?.message || e);
-                        }
-                    }
-                    const alertsLabel = outRangeEnabled ? OUT_RANGE_ALERT_ON : OUT_RANGE_ALERT_OFF;
-
-                    keyboard.inline_keyboard.push([
-                        {
-                            text: alertsLabel,
-                            callback_data: `toggle_alerts_${position.mintAddress}`
-                        },
-                        {
-                            text: `📊 Stats`,
-                            callback_data: `stats`
-                        }
-                    ]);
-
-                    continue;
-                }
-
-                // Persist/update the position so toggles have a position_id
-                try {
-                    const [sym0, sym1] = await Promise.all([
-                        resolveTokenSymbol(position.mint0),
-                        resolveTokenSymbol(position.mint1)
-                    ]);
-
-                    const saved = await upsertPosition({
-                        wallet_id: wallet.id,
-                        nft_mint: position.mintAddress,
-                        pool_address: position.poolId,
-                        token0_mint: position.mint0,
-                        token1_mint: position.mint1,
-                        token0_symbol: sym0,
-                        token1_symbol: sym1,
-                        fee_tier: null,
-                        lower_price: position.lowerPrice,
-                        upper_price: position.upperPrice,
-                        current_price: position.currentPrice,
-                        liquidity_value_usd: position.liquidityValueUsd,
-                        range_percent: position.range_percent, // Use existing range_percent
-                        status: 'active'
-                    });
-                    
-                    // Update positionId in positionsData if it wasn't set before
-                    if (!position.positionId && saved.id) {
-                        position.positionId = saved.id;
-                    }
-
-                    // Ensure config row and get current enabled state
-                    const cfg = await ensureProximityRow(saved.id);
-                    const outRangeEnabled = cfg?.out_of_range_enabled !== 0 && cfg?.out_of_range_enabled !== false;
-                    const alertsLabel = outRangeEnabled ? OUT_RANGE_ALERT_ON : OUT_RANGE_ALERT_OFF;
-
-                    // Get auto-rebalance status
-                    const autoRebalanceEnabled = saved.auto_rebalance_enabled || false;
-                    const autoRebalanceLabel = autoRebalanceEnabled ? '🤖✅ Auto-Rebalance' : '🤖❌ Auto-Rebalance';
-
-                    // Row 1: Close and Top Up buttons
-                    keyboard.inline_keyboard.push([
-                        {
-                            text: `🔴 Close #${index + 1}`,
-                            callback_data: `position_close_${position.mintAddress}`
-                        },
-                        {
-                            text: `💰 Top Up #${index + 1}`,
-                            callback_data: `topup_${position.mintAddress}`
-                        }
-                    ]);
-
-                    // Row 2: Rebalance and Auto-Rebalance buttons
-                    keyboard.inline_keyboard.push([
-                        {
-                            text: `⚖️ Rebalance #${index + 1}`,
-                            callback_data: `rebalance_${position.mintAddress}`
-                        },
-                        {
-                            text: autoRebalanceLabel,
-                            callback_data: `toggle_autorebalance_${saved.id}`
-                        }
-                    ]);
-
-                    // Row 3: New Range button (if position has range_percent set)
-                    if (saved.range_percent != null) {
-                        keyboard.inline_keyboard.push([
-                            {
-                                text: `🔧 New Range #${index + 1}`,
-                                callback_data: `rebalance_newrange_${position.mintAddress}`
-                            }
-                        ]);
-                    }
-
-                    // Row 4: Alerts and Stats buttons
-                    keyboard.inline_keyboard.push([
-                        {
-                            text: alertsLabel,
-                            callback_data: `toggle_alerts_${position.mintAddress}`
-                        },
-                        {
-                            text: `📊 Stats`,
-                            callback_data: `stats`
-                        }
-                    ]);
-
-                    // Row 5: Link Previous Stats button (always visible)
-                    keyboard.inline_keyboard.push([
-                        {
-                            text: `📊 Link Previous Stats`,
-                            callback_data: `link_stats_prompt_${saved.id}`
-                        }
-                    ]);
-                } catch (e) {
-                    console.warn('Persist position failed:', e?.message || e);
-                }
-            }
-
-            // Add global Rewards and Refresh buttons at the bottom
-            if (keyboard.inline_keyboard.length > 0) {
-                keyboard.inline_keyboard.push([
-                    { text: '💰 Rewards', callback_data: 'rewards' },
-                ]);
-                keyboard.inline_keyboard.push([
-                    { text: '🔄 Refresh', callback_data: 'positions_refresh' }
-                ]);
-            }
+            // Cache positions data for fast in-place toggling
+            _lastPositionsDataByChatId.set(chatId, {
+                positions: filteredPositionsData,
+                wallet,
+                messageId: loadingMsg.message_id
+            });
 
             // Send the main message with inline buttons only
             await bot.editMessageText(
@@ -585,6 +433,292 @@ export async function handlePositions(bot, msg, opts = {}) {
             formatErrorMessage(`Failed to load wallet: ${outerError.message}`),
             { parse_mode: 'Markdown' }
         );
+    }
+}
+
+/**
+ * Build inline keyboard for positions list
+ * 
+ * @param {Array} filteredPositionsData - List of positions
+ * @param {Object} wallet - Active wallet
+ * @returns {Promise<Object>} Telegram inline keyboard markup
+ */
+export async function buildPositionsInlineKeyboard(filteredPositionsData, wallet) {
+    const keyboard = { inline_keyboard: [] };
+
+    // Build buttons per position with persisted DB rows and config
+    for (let index = 0; index < filteredPositionsData.length; index++) {
+        const position = filteredPositionsData[index];
+        if (!position.success) continue;
+
+        const isOutOfRange = position.inRange === false || position.isOutOfRange === true;
+        const isHidden = isOutOfRange && !!position.is_hidden;
+
+        // If hidden, only show the "Show" toggle button for this position
+        if (isHidden) {
+            keyboard.inline_keyboard.push([
+                {
+                    text: `👁️ Show #${index + 1}`,
+                    callback_data: `toggle_hide_${position.mintAddress}`
+                }
+            ]);
+            continue;
+        }
+
+        // Handle Meteora DLMM positions: STRICTLY READ-ONLY
+        if (position.protocol === 'meteora' || position.isReadOnly) {
+            const meteoraUrl = position.poolUrl || `https://app.meteora.ag/dlmm/${position.poolId}`;
+            const solscanUrl = `https://solscan.io/account/${position.mintAddress}`;
+
+            // Row 1: External Links
+            keyboard.inline_keyboard.push([
+                {
+                    text: `🪐 View on Meteora #${index + 1}`,
+                    url: meteoraUrl
+                },
+                {
+                    text: `🔍 View on Solscan`,
+                    url: solscanUrl
+                }
+            ]);
+
+            // Row 2: Alerts and Stats buttons (matching PancakeSwap positions)
+            let posId = position.positionId;
+            if (!posId) {
+                try {
+                    const existing = await db.select({ id: positionsTable.id })
+                        .from(positionsTable)
+                        .where(eq(positionsTable.nft_mint, position.mintAddress))
+                        .limit(1);
+                    if (existing?.[0]?.id) {
+                        posId = existing[0].id;
+                        position.positionId = posId;
+                    }
+                } catch (_) {}
+            }
+
+            let outRangeEnabled = true;
+            if (posId) {
+                try {
+                    const cfg = await ensureProximityRow(posId);
+                    outRangeEnabled = cfg?.out_of_range_enabled !== 0 && cfg?.out_of_range_enabled !== false;
+                } catch (e) {
+                    console.warn('ensureProximityRow error for Meteora:', e?.message || e);
+                }
+            }
+            const alertsLabel = outRangeEnabled ? OUT_RANGE_ALERT_ON : OUT_RANGE_ALERT_OFF;
+
+            keyboard.inline_keyboard.push([
+                {
+                    text: alertsLabel,
+                    callback_data: `toggle_alerts_${position.mintAddress}`
+                },
+                {
+                    text: `📊 Stats`,
+                    callback_data: `stats`
+                }
+            ]);
+
+            // Row 3: Hide button if position is out of range
+            if (isOutOfRange) {
+                keyboard.inline_keyboard.push([
+                    {
+                        text: `👁️ Hide #${index + 1}`,
+                        callback_data: `toggle_hide_${position.mintAddress}`
+                    }
+                ]);
+            }
+
+            continue;
+        }
+
+        // PancakeSwap positions:
+        try {
+            let posId = position.positionId;
+            let autoRebalanceEnabled = false;
+            let rangePercent = position.range_percent;
+
+            if (wallet) {
+                const [sym0, sym1] = await Promise.all([
+                    resolveTokenSymbol(position.mint0),
+                    resolveTokenSymbol(position.mint1)
+                ]);
+
+                const saved = await upsertPosition({
+                    wallet_id: wallet.id,
+                    nft_mint: position.mintAddress,
+                    pool_address: position.poolId,
+                    token0_mint: position.mint0,
+                    token1_mint: position.mint1,
+                    token0_symbol: sym0,
+                    token1_symbol: sym1,
+                    fee_tier: null,
+                    lower_price: position.lowerPrice,
+                    upper_price: position.upperPrice,
+                    current_price: position.currentPrice,
+                    liquidity_value_usd: position.liquidityValueUsd,
+                    range_percent: position.range_percent,
+                    status: 'active'
+                });
+
+                if (!position.positionId && saved.id) {
+                    position.positionId = saved.id;
+                }
+                posId = position.positionId || saved.id;
+                autoRebalanceEnabled = saved.auto_rebalance_enabled || false;
+                if (saved.range_percent != null) rangePercent = saved.range_percent;
+                if (saved.is_hidden !== undefined && position.is_hidden === undefined) {
+                    position.is_hidden = !!saved.is_hidden;
+                }
+            }
+
+            let outRangeEnabled = true;
+            if (posId) {
+                const cfg = await ensureProximityRow(posId);
+                outRangeEnabled = cfg?.out_of_range_enabled !== 0 && cfg?.out_of_range_enabled !== false;
+            }
+            const alertsLabel = outRangeEnabled ? OUT_RANGE_ALERT_ON : OUT_RANGE_ALERT_OFF;
+            const autoRebalanceLabel = autoRebalanceEnabled ? '🤖✅ Auto-Rebalance' : '🤖❌ Auto-Rebalance';
+
+            // Row 1: Close and Top Up buttons
+            keyboard.inline_keyboard.push([
+                {
+                    text: `🔴 Close #${index + 1}`,
+                    callback_data: `position_close_${position.mintAddress}`
+                },
+                {
+                    text: `💰 Top Up #${index + 1}`,
+                    callback_data: `topup_${position.mintAddress}`
+                }
+            ]);
+
+            // Row 2: Rebalance and Auto-Rebalance buttons
+            keyboard.inline_keyboard.push([
+                {
+                    text: `⚖️ Rebalance #${index + 1}`,
+                    callback_data: `rebalance_${position.mintAddress}`
+                },
+                {
+                    text: autoRebalanceLabel,
+                    callback_data: `toggle_autorebalance_${posId}`
+                }
+            ]);
+
+            // Row 3: New Range button (if position has range_percent set)
+            if (rangePercent != null) {
+                keyboard.inline_keyboard.push([
+                    {
+                        text: `🔧 New Range #${index + 1}`,
+                        callback_data: `rebalance_newrange_${position.mintAddress}`
+                    }
+                ]);
+            }
+
+            // Row 4: Alerts and Stats buttons
+            keyboard.inline_keyboard.push([
+                {
+                    text: alertsLabel,
+                    callback_data: `toggle_alerts_${position.mintAddress}`
+                },
+                {
+                    text: `📊 Stats`,
+                    callback_data: `stats`
+                }
+            ]);
+
+            // Row 5: Link Previous Stats button (always visible)
+            if (posId) {
+                keyboard.inline_keyboard.push([
+                    {
+                        text: `📊 Link Previous Stats`,
+                        callback_data: `link_stats_prompt_${posId}`
+                    }
+                ]);
+            }
+
+            // Row 6: Hide button if position is out of range
+            if (isOutOfRange) {
+                keyboard.inline_keyboard.push([
+                    {
+                        text: `👁️ Hide #${index + 1}`,
+                        callback_data: `toggle_hide_${position.mintAddress}`
+                    }
+                ]);
+            }
+        } catch (e) {
+            console.warn('Persist position failed:', e?.message || e);
+        }
+    }
+
+    // Add global Rewards and Refresh buttons at the bottom
+    if (keyboard.inline_keyboard.length > 0) {
+        keyboard.inline_keyboard.push([
+            { text: '💰 Rewards', callback_data: 'rewards' },
+        ]);
+        keyboard.inline_keyboard.push([
+            { text: '🔄 Refresh', callback_data: 'positions_refresh' }
+        ]);
+    }
+
+    return keyboard;
+}
+
+/**
+ * Handle toggle hide position callback
+ * 
+ * Toggles show/hide for an out-of-range position
+ * 
+ * @param {TelegramBot} bot - Bot instance
+ * @param {Object} callbackQuery - Callback query object
+ */
+export async function handleToggleHidePosition(bot, callbackQuery) {
+    const chatId = callbackQuery.message.chat.id;
+    const data = callbackQuery.data;
+    const nftAddress = data.replace('toggle_hide_', '');
+
+    if (!nftAddress) {
+        await bot.answerCallbackQuery(callbackQuery.id, {
+            text: '❌ Invalid position data',
+            show_alert: true
+        });
+        return;
+    }
+
+    try {
+        const newHidden = await togglePositionHidden(nftAddress);
+        const actionText = newHidden ? '🙈 Position hidden' : '👁️ Position shown';
+
+        await bot.answerCallbackQuery(callbackQuery.id, { text: actionText });
+
+        // Fast update: if we have cached position data for this chat and message, update in-place
+        const cached = _lastPositionsDataByChatId.get(chatId);
+        if (cached && cached.messageId === callbackQuery.message.message_id && Array.isArray(cached.positions)) {
+            const targetPos = cached.positions.find(p => p.mintAddress === nftAddress);
+            if (targetPos) {
+                targetPos.is_hidden = newHidden;
+
+                const updatedMessage = await formatPositionsListMessage(cached.positions);
+                const updatedKeyboard = await buildPositionsInlineKeyboard(cached.positions, cached.wallet);
+
+                await bot.editMessageText(updatedMessage, {
+                    chat_id: chatId,
+                    message_id: callbackQuery.message.message_id,
+                    parse_mode: 'Markdown',
+                    reply_markup: updatedKeyboard,
+                    disable_web_page_preview: true
+                });
+                return;
+            }
+        }
+
+        // Fallback: full refresh if cache is not available
+        await handlePositionsRefresh(bot, callbackQuery);
+    } catch (err) {
+        console.error('Toggle hide position error:', err);
+        await bot.answerCallbackQuery(callbackQuery.id, {
+            text: `❌ Failed: ${err?.message || err}`,
+            show_alert: true
+        });
     }
 }
 

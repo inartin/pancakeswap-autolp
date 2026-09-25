@@ -362,6 +362,9 @@ export async function formatPositionsListMessage(positionsData) {
     let message = ``;
 
     for (const [index, position] of positionsData.entries()) {
+        const isOutOfRange = position.inRange === false || position.isOutOfRange === true;
+        const isHidden = isOutOfRange && !!position.is_hidden;
+
         // Position header
         const isMeteora = position.protocol === 'meteora';
         const positionIdStr = position.positionId ? ` (ID: ${position.positionId})` : '';
@@ -369,15 +372,32 @@ export async function formatPositionsListMessage(positionsData) {
             ? ` Fee: ${(position.feeTierPercent * 100).toFixed(2)}%` 
             : '';
         
+        // Get token symbols
+        const token0Symbol = position.token0Symbol || (await getTokenInfo(position.mint0))?.ticker || 'T0';
+        const token1Symbol = position.token1Symbol || (await getTokenInfo(position.mint1))?.ticker || 'T1';
+
+        // Compact display for hidden out-of-range positions
+        if (isHidden) {
+            const header = isMeteora 
+                ? `🪐 *Meteora DLMM Position #${index + 1}*${feeStr}`
+                : `*Position #${index + 1}*${positionIdStr}${feeStr}`;
+            const liqStr = position.liquidityValueUsd && position.liquidityValueUsd > 0
+                ? ` (${formatCurrency(position.liquidityValueUsd)})`
+                : '';
+            
+            message += `${header}\n💧 ${token0Symbol}/${token1Symbol}${liqStr} — ⭕ *Out of Range* _(Hidden)_\n`;
+
+            if (index < positionsData.length - 1) {
+                message += `\n${LINE_DIVIDER}\n\n`;
+            }
+            continue;
+        }
+
         if (isMeteora) {
             message += `🪐 *Meteora DLMM Position #${index + 1}*${feeStr}\n\n`;
         } else {
             message += `*Position #${index + 1}*${positionIdStr}${feeStr}\n\n`;
         }
-
-        // Get token symbols
-        const token0Symbol = position.token0Symbol || (await getTokenInfo(position.mint0))?.ticker || 'T0';
-        const token1Symbol = position.token1Symbol || (await getTokenInfo(position.mint1))?.ticker || 'T1';
 
         // Pool name and fee tier
         message += `💧 ${token0Symbol}/${token1Symbol}`;

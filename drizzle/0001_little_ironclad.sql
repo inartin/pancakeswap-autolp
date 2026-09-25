@@ -1,0 +1,1 @@
+ALTER TABLE `positions` ADD `is_hidden` integer DEFAULT false NOT NULL;

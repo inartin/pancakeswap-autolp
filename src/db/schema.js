@@ -81,6 +81,7 @@ export const positions = sqliteTable('positions', {
     // Manual override protection (Phase 5: New Strategy)
     last_rebalance_type: text('last_rebalance_type').default('auto'), // 'auto' | 'manual' - tracks who triggered last rebalance
     manual_range_locked: integer('manual_range_locked', { mode: 'boolean' }).default(false), // Lock range if user manually set <1%
+    is_hidden: integer('is_hidden', { mode: 'boolean' }).notNull().default(false), // Toggle show/hide for out-of-range positions
     
     status: text('status').notNull().default('active'), // active, closed
     created_at: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),

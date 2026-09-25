@@ -600,6 +600,13 @@ export async function startBot() {
             return;
         }
 
+        // Handle per-position show/hide toggle for out-of-range positions
+        if (data.startsWith('toggle_hide_')) {
+            const { handleToggleHidePosition } = await import('./handlers/positions.handler.js');
+            handleToggleHidePosition(bot, callbackQuery);
+            return;
+        }
+
         // Handle auto-rebalance toggle (initial, confirmation, info, and claim toggle within menu)
         if (data.startsWith('toggle_autorebalance_') || data.startsWith('autorebalance_info_') || data.startsWith('toggle_claim_in_autorebalance_')) {
             handleToggleAutoRebalance(bot, callbackQuery);

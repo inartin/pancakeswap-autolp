@@ -59,16 +59,17 @@ export async function upsertPosition(positionData, options = {}) {
         const existingPosition = existing[0];
         const updateData = { ...positionData };
         
-        // Preserve existing non-null values when new data has null
+        // Preserve existing non-null values when new data has null or undefined
         const fieldsToPreserve = [
             'token0_symbol', 
             'token1_symbol', 
             'fee_tier', 
-            'range_percent'
+            'range_percent',
+            'is_hidden'
         ];
         
         for (const field of fieldsToPreserve) {
-            if (updateData[field] === null && existingPosition[field] !== null) {
+            if ((updateData[field] === null || updateData[field] === undefined) && existingPosition[field] !== null && existingPosition[field] !== undefined) {
                 updateData[field] = existingPosition[field];
             }
         }
@@ -351,3 +352,62 @@ export async function getPositionClaimBeforeRebalanceStatus(positionId) {
     
     return !!result[0].claim_before_rebalance;
 }
+
+/**
+ * Toggle hidden status for a position
+ * 
+ * @param {string|number} identifier - Position NFT mint address or database ID
+ * @returns {Promise<boolean>} New hidden state (true = hidden, false = shown)
+ */
+export async function togglePositionHidden(identifier) {
+    const isId = typeof identifier === 'number';
+    const condition = isId 
+        ? eq(positions.id, identifier)
+        : eq(positions.nft_mint, identifier);
+        
+    const result = await db.select()
+        .from(positions)
+        .where(condition)
+        .limit(1);
+
+    if (!result || result.length === 0) {
+        throw new Error('Position not found');
+    }
+
+    const currentHidden = !!result[0].is_hidden;
+    const newHidden = !currentHidden;
+
+    await db.update(positions)
+        .set({
+            is_hidden: newHidden,
+            updated_at: new Date()
+        })
+        .where(condition);
+
+    return newHidden;
+}
+
+/**
+ * Get hidden status for a position
+ * 
+ * @param {string|number} identifier - Position NFT mint address or database ID
+ * @returns {Promise<boolean>} Whether position is hidden
+ */
+export async function getPositionHiddenStatus(identifier) {
+    const isId = typeof identifier === 'number';
+    const condition = isId 
+        ? eq(positions.id, identifier)
+        : eq(positions.nft_mint, identifier);
+
+    const result = await db.select({ is_hidden: positions.is_hidden })
+        .from(positions)
+        .where(condition)
+        .limit(1);
+
+    if (!result || result.length === 0) {
+        return false;
+    }
+
+    return !!result[0].is_hidden;
+}
+

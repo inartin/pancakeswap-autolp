@@ -228,6 +228,35 @@ export function formatRewardsMessage(walletAddress, positionsData, claimedSinceR
         } else {
             message += `\n*Claimed:* ${formatCurrency(totalClaimed)}\n`;
         }
+
+        // Show separately for each position when there are multiple positions
+        const positionClaimedItems = [];
+        if (claimedSinceReset > 0) {
+            positionClaimedItems.push({
+                label: 'PancakeSwap',
+                amount: claimedSinceReset
+            });
+        }
+        positionsData.forEach((position, index) => {
+            if (position.protocol === 'meteora') {
+                const fees = parseFloat(position.allTimeFeesUsd) || 0;
+                const pair = (position.token0Symbol && position.token1Symbol)
+                    ? `${position.token0Symbol}/${position.token1Symbol}`
+                    : `DLMM`;
+                const isOutOfRange = position.inRange === false || position.isOutOfRange === true;
+                const statusNote = isOutOfRange ? ' _(Out of Range)_' : '';
+                positionClaimedItems.push({
+                    label: `#${index + 1} ${pair}${statusNote}`,
+                    amount: fees
+                });
+            }
+        });
+
+        if (positionClaimedItems.length > 1) {
+            positionClaimedItems.forEach(item => {
+                message += `   • ${item.label}: ${formatCurrency(item.amount)}\n`;
+            });
+        }
     }
 
     return message;

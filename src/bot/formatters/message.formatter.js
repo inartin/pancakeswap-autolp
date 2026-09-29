@@ -190,6 +190,7 @@ export function formatRewardsMessage(walletAddress, positionsData, claimedSinceR
         });
     }
 
+    message = message.trimEnd();
     message += `\n\n*💵 Pending Rewards:* *${formatCurrency(totalValueUsd)}*\n`;
 
     // The saved wallet counter is not a protocol or current-position total.
@@ -197,7 +198,7 @@ export function formatRewardsMessage(walletAddress, positionsData, claimedSinceR
     if (claimedSinceReset != null || lifetimeFees) {
         message += `\n*🧾 Statistics*\n`;
         if (claimedSinceReset != null) {
-            message += `*Wallet recorded claims since reset:* ${formatCurrency(claimedSinceReset)}\n`;
+            message += `*Claims since reset:* ${formatCurrency(claimedSinceReset)}\n`;
         }
         message += lifetimeFees;
     }

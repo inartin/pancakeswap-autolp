@@ -54,5 +54,5 @@ export function formatMeteoraLifetimeFees(positionsData) {
         const outOfRange = position.inRange === false || position.isOutOfRange === true;
         return [`   • #${index + 1} ${pair}${outOfRange ? ' _(Out of Range)_' : ''}: ${formatCurrency(parseFloat(position.allTimeFeesUsd) || 0)}\n`];
     });
-    return items.length ? `\n*Meteora lifetime fees (current positions):*\n${items.join('')}` : '';
+    return items.length ? `\n*Meteora Total Fees:*\n${items.join('')}` : '';
 }

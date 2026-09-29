@@ -1,8 +1,7 @@
-import { formatMeteoraRewards, formatMeteoraLinks, formatMeteoraLiquidity } from '../../protocols/meteora/presentation.js';
+import { formatMeteoraRewards, formatMeteoraLinks, formatMeteoraLiquidity, formatMeteoraLifetimeFees } from '../../protocols/meteora/presentation.js';
 import { formatShortAddress, formatCurrency, formatPercentage, formatDecimal, formatTokenAmount, getPancakeSwapPositionUrl, getPancakeSwapPoolUrl } from '../../utils/format.util.js';
 import { formatPositionVisualization } from '../../utils/visualization.util.js';
 import { getTokenInfo } from '../../utils/token.util.js';
-import { SPLIT_CLAIM_PERCENT, SPLIT_KEEP_PERCENT } from '../../config/constants.js';
 
 /**
  * Formats rewards data into a Telegram message
@@ -193,47 +192,14 @@ export function formatRewardsMessage(walletAddress, positionsData, claimedSinceR
 
     message += `\n\n*💵 Pending Rewards:* *${formatCurrency(totalValueUsd)}*\n`;
 
-    // Show bot-recorded claims since the wallet reset across protocols.
-    const totalClaimed = claimedSinceReset ?? 0;
-    if (claimedSinceReset !== null && claimedSinceReset !== undefined) {
-        message += `\n*🧾 Statistics*`;
-        if (splitStrategy) {
-            const claimedOut = totalClaimed * SPLIT_CLAIM_PERCENT;
-            const compounded = totalClaimed * SPLIT_KEEP_PERCENT;
-            message += `\n*Claimed:* ${formatCurrency(claimedOut)}\n`;
-            message += `\n*Compounded:* ${formatCurrency(compounded)}\n`;
-        } else {
-            message += `\n*Claimed:* ${formatCurrency(totalClaimed)}\n`;
+    // The saved wallet counter is not a protocol or current-position total.
+    const lifetimeFees = formatMeteoraLifetimeFees(positionsData);
+    if (claimedSinceReset != null || lifetimeFees) {
+        message += `\n*🧾 Statistics*\n`;
+        if (claimedSinceReset != null) {
+            message += `*Wallet recorded claims since reset:* ${formatCurrency(claimedSinceReset)}\n`;
         }
-
-        // Show separately for each position when there are multiple positions
-        const positionClaimedItems = [];
-        if (claimedSinceReset > 0) {
-            positionClaimedItems.push({
-                label: 'PancakeSwap',
-                amount: claimedSinceReset
-            });
-        }
-        positionsData.forEach((position, index) => {
-            if (position.protocol === 'meteora') {
-                const fees = parseFloat(position.allTimeFeesUsd) || 0;
-                const pair = (position.token0Symbol && position.token1Symbol)
-                    ? `${position.token0Symbol}/${position.token1Symbol}`
-                    : `DLMM`;
-                const isOutOfRange = position.inRange === false || position.isOutOfRange === true;
-                const statusNote = isOutOfRange ? ' _(Out of Range)_' : '';
-                positionClaimedItems.push({
-                    label: `#${index + 1} ${pair}${statusNote}`,
-                    amount: fees
-                });
-            }
-        });
-
-        if (positionClaimedItems.length > 1) {
-            positionClaimedItems.forEach(item => {
-                message += `   • ${item.label}: ${formatCurrency(item.amount)}\n`;
-            });
-        }
+        message += lifetimeFees;
     }
 
     return message;

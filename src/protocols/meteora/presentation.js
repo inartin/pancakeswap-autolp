@@ -44,3 +44,15 @@ export function formatMeteoraLiquidity(position, token0Symbol, token1Symbol) {
     if (position.amount0Human == null || position.amount1Human == null) return '';
     return `\n💎 *Liquidity:*\n   ${formatDecimal(position.amount0Human, 'auto')} ${token0Symbol} | ${formatDecimal(position.amount1Human, 'auto')} ${token1Symbol}\n`;
 }
+
+// API lifetime fees have a different scope from the wallet's recorded claim counter.
+export function formatMeteoraLifetimeFees(positionsData) {
+    const items = positionsData.flatMap((position, index) => {
+        if (position.protocol !== 'meteora') return [];
+        const pair = position.token0Symbol && position.token1Symbol
+            ? `${position.token0Symbol}/${position.token1Symbol}` : 'DLMM';
+        const outOfRange = position.inRange === false || position.isOutOfRange === true;
+        return [`   • #${index + 1} ${pair}${outOfRange ? ' _(Out of Range)_' : ''}: ${formatCurrency(parseFloat(position.allTimeFeesUsd) || 0)}\n`];
+    });
+    return items.length ? `\n*Meteora lifetime fees (current positions):*\n${items.join('')}` : '';
+}

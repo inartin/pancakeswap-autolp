@@ -1,6 +1,6 @@
 # PancakeSwap Autofarmer Bot — Solana
 
-### + Read-Only: Meteora DLMM & Uniswap V3 (Ethereum)
+### + Meteora DLMM Claims & Read-Only Uniswap V3 (Ethereum)
 
 <p align="left">
   <img src="https://img.shields.io/badge/Node.js-18%2B-339933?style=for-the-badge&logo=nodedotjs&logoColor=white" alt="Node.js" />
@@ -17,7 +17,7 @@
 > - May have bugs
 > - Use at your own risk
 
-Telegram bot for automating PancakeSwap liquidity farming on Solana, with read-only portfolio and fee tracking for Meteora DLMM (Solana) and Uniswap V3 (Ethereum).
+Telegram bot for automating PancakeSwap liquidity farming on Solana, with portfolio tracking and manual claims for Meteora DLMM (Solana), plus read-only Uniswap V3 (Ethereum) tracking.
 
 ---
 
@@ -36,12 +36,14 @@ Telegram bot for automating PancakeSwap liquidity farming on Solana, with read-o
 
 - **Multi-Wallet Management:** Up to 3 active wallets per user (Solana & read-only EVM).
 - **Position Tracking with Pool Filtering:** Real-time tracking across PancakeSwap CLMM and Meteora DLMM pools.
-- **🪐 Meteora DLMM (Read-Only):**
+- **🪐 Meteora DLMM:**
   - Live detection of open DLMM positions (`Position` / `PositionV2`) across all pairs.
   - Accurate bin price boundaries, active bin calculation, and in-range indicators.
   - Live claimable fees breakdown (Token0, Token1, and USD value).
   - All-time earned fees and estimated APR / hourly / daily income.
-  - Direct links to Meteora and Solscan with strict read-only protection (no write actions or automated transactions).
+  - Manual fee and liquidity-mining reward claims, using the same wallet claim address and split settings as PancakeSwap.
+  - Claim and Set Claim Address buttons on positions/rewards; direct links to Meteora and Solscan.
+  - Liquidity changes and automatic rebalancing remain unavailable for Meteora.
 - **Automated Liquidity Management (PancakeSwap):** Create, top up, and close positions.
 - **Smart Token Swaps & Auto-Unwrap:** Automatic WSOL unwrapping and token balancing via Jupiter Swap.
 - **Real-Time Rewards & Compounding:** Real-time claimable fee calculation, single-tap claims, and auto-compounding back into liquidity.
@@ -163,7 +165,7 @@ Open Telegram, find your bot, and send `/start`.
 Run unit and integration tests:
 
 ```bash
-node tests/meteora-dlmm.test.js    # Meteora DLMM price math & live position tests
+pnpm exec node tests/meteora-dlmm.test.js    # Meteora DLMM price math & live position tests
 node tests/token.test.js           # Token metadata & price lookup tests
 ```
 

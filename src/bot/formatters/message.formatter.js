@@ -1,3 +1,4 @@
+import { formatMeteoraRewards, formatMeteoraLinks, formatMeteoraLiquidity } from '../../protocols/meteora/presentation.js';
 import { formatShortAddress, formatCurrency, formatPercentage, formatDecimal, formatTokenAmount, getPancakeSwapPositionUrl, getPancakeSwapPoolUrl } from '../../utils/format.util.js';
 import { formatPositionVisualization } from '../../utils/visualization.util.js';
 import { getTokenInfo } from '../../utils/token.util.js';
@@ -60,11 +61,6 @@ export function formatRewardsMessage(walletAddress, positionsData, claimedSinceR
         return Boolean(pos.transfers && pos.transfers.some(t => parseFloat(t.uiAmount) > 0));
     };
 
-    // Calculate Meteora all-time fees across all positions in wallet
-    const meteoraAllTimeFees = positionsData
-        .filter(p => p.protocol === 'meteora')
-        .reduce((sum, p) => sum + (parseFloat(p.allTimeFeesUsd) || 0), 0);
-
     // Filter out positions that are out of range and have no rewards
     const visiblePositions = positionsData.filter(pos => !(isPosOutOfRange(pos) && !posHasRewards(pos)));
 
@@ -75,29 +71,10 @@ export function formatRewardsMessage(walletAddress, positionsData, claimedSinceR
         message += `No claimable rewards found.\n\n`;
     } else {
         visiblePositions.forEach((position, index) => {
-            // Handle Meteora DLMM position (read-only)
+            // Delegate Meteora presentation
             if (position.protocol === 'meteora') {
-                const positionLabel = `🪐 [Meteora DLMM #${index + 1}](${position.poolUrl || `https://app.meteora.ag/dlmm/${position.poolId}`})`;
-                message += `${positionLabel}  *${position.token0Symbol}/${position.token1Symbol}*\n`;
-
-                const hasClaimable = (position.unclaimedFeesUsd > 0) || (position.unclaimedFeeToken0 > 0) || (position.unclaimedFeeToken1 > 0);
-                if (hasClaimable) {
-                    totalValueUsd += (position.unclaimedFeesUsd || 0);
-                    message += `💰 Claimable: *${formatCurrency(position.unclaimedFeesUsd || 0)}*\n`;
-                    if (position.unclaimedFeeToken0 > 0) {
-                        message += `   • ${formatDecimal(position.unclaimedFeeToken0, 'auto')} ${position.token0Symbol}`;
-                        if (position.unclaimedFeeToken0Usd > 0) message += ` (${formatCurrency(position.unclaimedFeeToken0Usd)})`;
-                        message += `\n`;
-                    }
-                    if (position.unclaimedFeeToken1 > 0) {
-                        message += `   • ${formatDecimal(position.unclaimedFeeToken1, 'auto')} ${position.token1Symbol}`;
-                        if (position.unclaimedFeeToken1Usd > 0) message += ` (${formatCurrency(position.unclaimedFeeToken1Usd)})`;
-                        message += `\n`;
-                    }
-                    message += `🔒 _Read-only (Claim via Meteora App)_\n\n`;
-                } else {
-                    message += `No claimable rewards\n🔒 _Read-only_\n\n`;
-                }
+                message += formatMeteoraRewards(position, index);
+                totalValueUsd += position.unclaimedFeesUsd || 0;
 
                 if (index < visiblePositions.length - 1) {
                     message += `${LINE_DIVIDER}\n\n`;
@@ -216,9 +193,9 @@ export function formatRewardsMessage(walletAddress, positionsData, claimedSinceR
 
     message += `\n\n*💵 Pending Rewards:* *${formatCurrency(totalValueUsd)}*\n`;
 
-    // Show claimed since last reset if available, adding Meteora all-time fees earned
-    const totalClaimed = (claimedSinceReset !== null && claimedSinceReset !== undefined ? claimedSinceReset : 0) + meteoraAllTimeFees;
-    if (claimedSinceReset !== null && claimedSinceReset !== undefined || meteoraAllTimeFees > 0) {
+    // Show bot-recorded claims since the wallet reset across protocols.
+    const totalClaimed = claimedSinceReset ?? 0;
+    if (claimedSinceReset !== null && claimedSinceReset !== undefined) {
         message += `\n*🧾 Statistics*`;
         if (splitStrategy) {
             const claimedOut = totalClaimed * SPLIT_CLAIM_PERCENT;
@@ -462,12 +439,7 @@ export async function formatPositionsListMessage(positionsData) {
         const visualization = formatPositionVisualization(position);
         message += `\n${visualization}\n`;
 
-        if (isMeteora) {
-            if (position.amount0Human != null && position.amount1Human != null) {
-                message += `\n💎 *Liquidity:*\n`;
-                message += `   ${formatDecimal(position.amount0Human, 'auto')} ${token0Symbol} | ${formatDecimal(position.amount1Human, 'auto')} ${token1Symbol}\n`;
-            }
-        }
+        if (isMeteora) message += formatMeteoraLiquidity(position, token0Symbol, token1Symbol);
 
         // APR information (if available)
         if (position.aprData) {
@@ -557,9 +529,7 @@ export async function formatPositionsListMessage(positionsData) {
 
         // Add links to position and pool
         if (isMeteora) {
-            const meteoraUrl = position.poolUrl || `https://app.meteora.ag/dlmm/${position.poolId}`;
-            const solscanUrl = `https://solscan.io/account/${position.mintAddress}`;
-            message += `\n[View on Meteora →](${meteoraUrl})  |  [View on Solscan →](${solscanUrl})\n🔒 _Read-only (Meteora DLMM)_\n`;
+            message += formatMeteoraLinks(position);
         } else {
             const positionUrl = getPancakeSwapPositionUrl(position.poolId, position.mintAddress);
             const poolUrl = getPancakeSwapPoolUrl(position.poolId);

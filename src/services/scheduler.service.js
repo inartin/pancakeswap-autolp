@@ -1,3 +1,4 @@
+import { meteoraPoolUrl } from '../protocols/meteora/presentation.js';
 import { PositionMonitorService } from './position-monitor.service.js';
 import { migrateOutOfRangeCooldownToOneMinute } from './alert.service.js';
 import NotificationQueueService from './notification-queue.service.js';
@@ -212,7 +213,7 @@ export function startMonitoring(bot, options = {}) {
                 let messageOptions = baseOptions;
                 
                 if (t.isMeteora) {
-                    const poolUrl = t.poolAddress ? `https://app.meteora.ag/dlmm/${t.poolAddress}` : null;
+                    const poolUrl = t.poolAddress ? meteoraPoolUrl(t.poolAddress) : null;
                     const keyboard = [];
                     if (poolUrl) {
                         keyboard.push([{ text: '🪐 View on Meteora', url: poolUrl }]);

@@ -1,4 +1,4 @@
-import { binIdToPrice, fetchMeteoraDlmmPositions } from '../src/utils/meteora-dlmm.util.js';
+import { binIdToPrice, fetchMeteoraDlmmPositions } from '../src/protocols/meteora/positions.js';
 import { formatPositionsListMessage, formatRewardsMessage } from '../src/bot/formatters/message.formatter.js';
 
 async function runTests() {
@@ -33,16 +33,16 @@ async function runTests() {
         // 3. Test Message Formatting
         console.log('Test 3: Formatting positions & rewards messages');
         const posMessage = await formatPositionsListMessage(positions);
-        if (!posMessage.includes('Meteora DLMM Position') || !posMessage.includes('Read-only')) {
-            throw new Error('Positions list message missing Meteora headers or read-only notice');
+        if (!posMessage.includes('Meteora DLMM Position') || posMessage.includes('Read-only')) {
+            throw new Error('Positions list message missing Meteora headers or still has a read-only notice');
         }
-        console.log('  ✅ formatPositionsListMessage contains Meteora branding & read-only notice');
+        console.log('  ✅ formatPositionsListMessage contains Meteora branding without read-only notice');
 
         const rewMessage = formatRewardsMessage(testWallet, positions);
-        if (!rewMessage.includes('Meteora DLMM') || !rewMessage.includes('Read-only')) {
-            throw new Error('Rewards message missing Meteora headers or read-only notice');
+        if (!rewMessage.includes('Meteora DLMM') || rewMessage.includes('Read-only')) {
+            throw new Error('Rewards message missing Meteora headers or still has a read-only notice');
         }
-        console.log('  ✅ formatRewardsMessage contains Meteora branding & read-only notice\n');
+        console.log('  ✅ formatRewardsMessage contains Meteora branding without read-only notice\n');
     }
 
     console.log('🎉 All Meteora DLMM integration tests passed successfully!');

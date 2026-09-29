@@ -1,3 +1,4 @@
+import { meteoraClaimButtons } from '../../protocols/meteora/presentation.js';
 import { createSolanaConnection } from '../../utils/rpc.util.js';
 import { findPositions } from '../../utils/positions.util.js';
 import { gatherDecreaseLiquidityAccounts } from '../../utils/accounts.util.js';
@@ -7,7 +8,7 @@ import { formatRewardsMessage, formatErrorMessage, formatLoadingMessage } from '
 import { getActiveWallet, resetWalletRewardsCounter, getWalletRewardsSinceReset } from '../../services/wallet.service.js';
 import { calculateTokenAmounts, toBigInt, toNumberUnits } from '../../utils/range.util.js';
 import { getTokenInfo, getTokenInfoBatch } from '../../utils/token.util.js';
-import { fetchMeteoraDlmmPositions } from '../../utils/meteora-dlmm.util.js';
+import { fetchMeteoraDlmmPositions } from '../../protocols/meteora/positions.js';
 
 /**
  * Handles the /rewards command
@@ -234,16 +235,8 @@ export async function handleRewards(bot, msg) {
 
         // Add claim and compound buttons for each visible position that has rewards
         visiblePositions.forEach((position, index) => {
-            // Read-only Meteora DLMM: add view link instead of write actions
-            if (position.protocol === 'meteora' || position.isReadOnly) {
-                if (position.unclaimedFeesUsd > 0 || position.unclaimedFeeToken0 > 0 || position.unclaimedFeeToken1 > 0) {
-                    keyboard.inline_keyboard.push([
-                        {
-                            text: `🪐 View on Meteora #${index + 1}`,
-                            url: position.poolUrl || `https://app.meteora.ag/dlmm/${position.poolId}`
-                        }
-                    ]);
-                }
+            if (position.protocol === 'meteora') {
+                keyboard.inline_keyboard.push(meteoraClaimButtons(position, index));
                 return;
             }
 

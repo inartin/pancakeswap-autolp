@@ -3,7 +3,7 @@ import bs58 from 'bs58';
 import { getOrCreateUser } from '../../services/user.service.js';
 import { createWallet, walletExists, createEvmWallet } from '../../services/wallet.service.js';
 import { findPositions } from '../../utils/positions.util.js';
-import { fetchMeteoraDlmmPositions } from '../../utils/meteora-dlmm.util.js';
+import { fetchMeteoraDlmmPositions } from '../../protocols/meteora/positions.js';
 import { createSolanaConnection } from '../../utils/rpc.util.js';
 import { validateEvmAddress, getEvmBalance } from '../../utils/evm.util.js';
 import { buildWalletKeyboard, getCancelOnlyKeyboard } from '../keyboard.util.js';

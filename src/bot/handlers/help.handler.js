@@ -21,7 +21,7 @@ export function handleHelp(bot, msg) {
 /addposition - Create new liquidity position
 /positions - View all positions with range status
 /rewards - Check claimable rewards
-/claim <nft> - Claim rewards from position
+/claim <address> - Claim PancakeSwap or Meteora rewards
 /compound <nft> - Auto-compound rewards to position
 /rebalance <nft> - Rebalance position to current price
 /stats - View aggregated stats

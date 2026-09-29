@@ -1,8 +1,8 @@
 import axios from 'axios';
 import { PublicKey } from '@solana/web3.js';
 import { BorshCoder } from '@coral-xyz/anchor';
-import { METEORA_IDL, METEORA_PROGRAM_ID } from '../config/constants.js';
-import { getMintDecimals } from './token.util.js';
+import { METEORA_IDL, METEORA_PROGRAM_ID } from './constants.js';
+import { getMintDecimals } from '../../utils/token.util.js';
 
 const coder = new BorshCoder(METEORA_IDL);
 const METEORA_DATAPI_URL = 'https://dlmm.datapi.meteora.ag';
@@ -79,7 +79,7 @@ export async function fetchMeteoraDlmmPositions(walletAddress, connection = null
 
                     positionsList.push({
                         protocol: 'meteora',
-                        isReadOnly: true,
+                        isReadOnly: false,
                         success: true,
                         mintAddress: pos.positionAddress,
                         positionPda: pos.positionAddress,
@@ -202,7 +202,7 @@ export async function fetchMeteoraPositionOnChain(connection, positionAddress) {
 
     return {
         protocol: 'meteora',
-        isReadOnly: true,
+        isReadOnly: false,
         success: true,
         mintAddress: positionPubkey.toBase58(),
         positionPda: positionPubkey.toBase58(),
@@ -233,4 +233,13 @@ export async function fetchMeteoraPositionOnChain(connection, positionAddress) {
         positionUrl: `https://app.meteora.ag/dlmm/${pairPubkey.toBase58()}`,
         poolUrl: `https://app.meteora.ag/dlmm/${pairPubkey.toBase58()}`
     };
+}
+
+export async function fetchMeteoraPoolPrice(connection, account) {
+    const pair = coder.accounts.decode('LbPair', account.data);
+    const [decimalsX, decimalsY] = await Promise.all([
+        getMintDecimals(connection, pair.token_x_mint),
+        getMintDecimals(connection, pair.token_y_mint)
+    ]);
+    return binIdToPrice(pair.active_id, pair.bin_step, decimalsX ?? 9, decimalsY ?? 9);
 }

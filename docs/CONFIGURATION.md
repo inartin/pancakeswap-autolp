@@ -54,6 +54,16 @@ Speeds up static lookups (decimals, token programs, metadata).
 
 - `SPLIT_CLAIM_PERCENT` — Fraction (0–1) of claimed rewards transferred to a configured claim address. Default `0.75`.
 
+### Meteora claims
+
+Meteora uses the same **wallet-wide** claim address as PancakeSwap. Set/change/clear it from the wallet screen or **Set Claim Address** on a Meteora position. Without an address, funds stay in the active wallet. `/claim <Meteora position account>` and the Claim button collect swap fees and liquidity-mining rewards; PancakeSwap still uses its position NFT mint.
+
+Claims verify the on-chain position owner and reject positions with a different on-chain fee owner. SDK transactions run sequentially; each confirmed transaction is recorded, including zero/unknown USD values. Later failures report the successful signatures and any transaction whose confirmation is unknown. Check that signature before retrying.
+
+Forwarding uses confirmed token balance deltas only and shares PancakeSwap's dust threshold ($0.10) and optional split ratio. SOL is kept/transferred as WSOL, preserving existing wallet balances. Unknown-price/dust tokens stay in the wallet. Transfer failures are reported separately from successful claims. If a confirmed transaction receipt is unavailable, forwarding and remaining claims stop, and the signature is shown for inspection.
+
+Wallet claimed-since-reset totals now include recorded Meteora claims, without adding API lifetime earnings a second time. Historical claims made outside the bot are not included in that counter. No database migration is needed.
+
 ### Rebalance top-up (optional)
 
 - `REBALANCE_TOP_UP_ENABLED` — Default `true`

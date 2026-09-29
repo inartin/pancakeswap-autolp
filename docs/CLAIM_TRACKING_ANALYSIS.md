@@ -1,5 +1,7 @@
 # Claim Tracking Analysis & Implementation Plan
 
+> Historical analysis below. Current claims are recorded in `transactions`. Meteora records each confirmed SDK transaction through `src/protocols/meteora/claim.handler.js`, including claims with unknown USD value and partial success; see [Configuration](CONFIGURATION.md#meteora-claims).
+
 ## 🔍 Current State Analysis
 
 ### How Claims Work Now

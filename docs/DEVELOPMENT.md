@@ -6,6 +6,8 @@
 autofarmer-sol/
 ├── src/                    # Application code
 │   ├── bot/               # Telegram bot (handlers, formatters, middleware)
+│   ├── protocols/meteora/ # DLMM discovery, IDL, claims, presentation and tracking
+│   ├── chains/solana/    # Reusable claim transfers and transaction submission
 │   ├── cache/             # Redis / in-memory caches
 │   ├── config/            # Configuration files
 │   ├── db/                # Database (Drizzle ORM)
@@ -24,6 +26,16 @@ autofarmer-sol/
 ├── ecosystem.config.cjs   # PM2 configuration
 └── run.sh                 # Convenience launcher
 ```
+
+---
+
+## Protocol boundaries
+
+Meteora implementation lives in `src/protocols/meteora/`: `positions.js` handles discovery and pool prices, `claim.js` builds/executes DLMM claims, `claim.handler.js` handles Telegram results and history, and presentation/tracking/stats adapters serve the shared bot. Shared handlers only dispatch and combine protocol results. Keep future Meteora features here.
+
+Wallet settings, encryption, persistence, alerts, and common formatting remain shared. Solana claim transfers live in `src/chains/solana/claim-transfer.js`; PancakeSwap retains its existing export for callers. Meteora uses `claim-transaction.js`, which retains the signed transaction signature on uncertain confirmation and does not rebuild/resubmit a claim. The installed DLMM SDK is loaded through its CommonJS entry because its ESM build uses directory imports unsupported by Node.
+
+Focused offline claim checks: `pnpm exec node --test tests/meteora-claim.test.js`. The existing `meteora-dlmm.test.js` is a separate live read-only discovery smoke test.
 
 ---
 

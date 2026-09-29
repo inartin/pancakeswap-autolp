@@ -27,7 +27,6 @@ import fs from 'fs';
 
 // Read the IDL file
 const idl = JSON.parse(fs.readFileSync('./src/idl/pancakeswap-idl.json', 'utf8'));
-const meteoraIdl = JSON.parse(fs.readFileSync('./src/idl/meteora-idl.json', 'utf8'));
 
 // =================================
 // APPLICATION METADATA
@@ -42,9 +41,6 @@ export const APP_VERSION = '0.12.4';
 
 // PancakeSwap CLMM Program (from IDL)
 export const PROGRAM_ID = new PublicKey(idl.address);
-
-// Meteora DLMM Program (from IDL)
-export const METEORA_PROGRAM_ID = new PublicKey(meteoraIdl.address || 'LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo');
 
 // Solana system programs
 export const MEMO_PROGRAM_ID = new PublicKey('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr');
@@ -78,9 +74,6 @@ export const TICKS_IN_ARRAY = 60;
 
 // PancakeSwap IDL for Anchor coder
 export const PANCAKESWAP_IDL = idl;
-
-// Meteora DLMM IDL for Anchor coder
-export const METEORA_IDL = meteoraIdl;
 
 // =================================
 // JUPITER SWAP CONFIGURATION

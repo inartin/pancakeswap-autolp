@@ -5,13 +5,16 @@
  * Following UIX framework format (lines 1245-1295 in autofarmer_message_framework.md)
  */
 
+import { trackMeteoraPositions } from '../../protocols/meteora/tracking.js';
+import { appendMeteoraPositionButtons } from '../../protocols/meteora/keyboard.js';
+
 import { Connection, PublicKey, Keypair } from '@solana/web3.js';
 import bs58 from 'bs58';
 import { createSolanaConnection } from '../../utils/rpc.util.js';
 import { COMMITMENT_LEVEL, DEFAULT_ADD_LIQUIDITY_SLIPPAGE_BPS, RECOMMENDED_SOL_BUFFER } from '../../config/constants.js';
 import { isEvmWallet, getEvmUniswapPositions } from '../../utils/evm.util.js';
 import { findPositions } from '../../utils/positions.util.js';
-import { fetchMeteoraDlmmPositions } from '../../utils/meteora-dlmm.util.js';
+import { fetchMeteoraDlmmPositions } from '../../protocols/meteora/positions.js';
 import { fetchPositionRangeData } from '../../utils/range.util.js';
 import { calculateCompleteApr } from '../../utils/apr.util.js';
 import { formatPositionsListMessage, formatErrorMessage, formatLoadingMessage } from '../formatters/message.formatter.js';
@@ -29,7 +32,7 @@ import { ensureProximityRow, getOutOfRangeConfig, toggleOutOfRangeEnabled, toggl
 import { buildPoolsReplyKeyboard } from '../keyboard.util.js';
 import { updatePoolsReplyKeyboard } from '../keyboard.util.js';
 import { storeKeyboardMessageId } from '../keyboard.util.js';
-import { getPositionStatistics, updateAccumulatedTime, carryOverStatistics, getDailyAverageApr, getMonthlyAverageApr, getLifetimeAverageApr } from '../../services/position-statistics.service.js';
+import { getPositionStatistics, carryOverStatistics, getDailyAverageApr, getMonthlyAverageApr, getLifetimeAverageApr } from '../../services/position-statistics.service.js';
 
 const OUT_RANGE_ALERT_ON = '🔔 Out of Range Alerts';
 const OUT_RANGE_ALERT_OFF = '🔕 Out of Range Alerts';
@@ -309,56 +312,7 @@ export async function handlePositions(bot, msg, opts = {}) {
                 }
             }
 
-            // Append Meteora DLMM positions with DB tracking for time-in-range statistics
-            for (const mPos of meteoraPositions) {
-                let statistics = null;
-                let positionId = null;
-                let isHidden = false;
-
-                try {
-                    const saved = await upsertPosition({
-                        wallet_id: wallet.id,
-                        nft_mint: mPos.mintAddress,
-                        pool_address: mPos.poolId,
-                        token0_mint: mPos.mint0,
-                        token1_mint: mPos.mint1,
-                        token0_symbol: mPos.token0Symbol,
-                        token1_symbol: mPos.token1Symbol,
-                        fee_tier: mPos.feeTierPercent,
-                        lower_price: mPos.lowerPrice,
-                        upper_price: mPos.upperPrice,
-                        current_price: mPos.currentPrice,
-                        liquidity_value_usd: mPos.liquidityValueUsd,
-                        range_percent: mPos.range_percent,
-                        auto_rebalance_enabled: false,
-                        claim_before_rebalance: false,
-                        status: 'active'
-                    });
-
-                    positionId = saved.id;
-                    isHidden = !!saved.is_hidden;
-                    statistics = await getPositionStatistics(saved.id);
-
-                    // Seed initial time in range from createdAt if statistics is fresh (0 ms accumulated)
-                    if (statistics && (statistics.time_in_range_ms + statistics.time_out_of_range_ms === 0)) {
-                        const createdAtMs = mPos.createdAt ? mPos.createdAt * 1000 : Date.now();
-                        const initialAgeMs = Math.max(0, Date.now() - createdAtMs);
-                        if (initialAgeMs > 0) {
-                            await updateAccumulatedTime(positionId, initialAgeMs, mPos.inRange);
-                            statistics = await getPositionStatistics(positionId);
-                        }
-                    }
-                } catch (dbErr) {
-                    console.warn(`Failed to track Meteora position ${mPos.mintAddress} in DB:`, dbErr.message);
-                }
-
-                positionsData.push({
-                    ...mPos,
-                    statistics,
-                    positionId,
-                    is_hidden: isHidden
-                });
-            }
+            positionsData.push(...await trackMeteoraPositions(meteoraPositions, wallet));
             
             // Filter positions by selected pool (if any)
             const activePoolLabel = requestedPoolLabel || _selectedPoolLabelByChatId.get(chatId) || null;
@@ -465,70 +419,8 @@ export async function buildPositionsInlineKeyboard(filteredPositionsData, wallet
             continue;
         }
 
-        // Handle Meteora DLMM positions: STRICTLY READ-ONLY
-        if (position.protocol === 'meteora' || position.isReadOnly) {
-            const meteoraUrl = position.poolUrl || `https://app.meteora.ag/dlmm/${position.poolId}`;
-            const solscanUrl = `https://solscan.io/account/${position.mintAddress}`;
-
-            // Row 1: External Links
-            keyboard.inline_keyboard.push([
-                {
-                    text: `🪐 View on Meteora #${index + 1}`,
-                    url: meteoraUrl
-                },
-                {
-                    text: `🔍 View on Solscan`,
-                    url: solscanUrl
-                }
-            ]);
-
-            // Row 2: Alerts and Stats buttons (matching PancakeSwap positions)
-            let posId = position.positionId;
-            if (!posId) {
-                try {
-                    const existing = await db.select({ id: positionsTable.id })
-                        .from(positionsTable)
-                        .where(eq(positionsTable.nft_mint, position.mintAddress))
-                        .limit(1);
-                    if (existing?.[0]?.id) {
-                        posId = existing[0].id;
-                        position.positionId = posId;
-                    }
-                } catch (_) {}
-            }
-
-            let outRangeEnabled = true;
-            if (posId) {
-                try {
-                    const cfg = await ensureProximityRow(posId);
-                    outRangeEnabled = cfg?.out_of_range_enabled !== 0 && cfg?.out_of_range_enabled !== false;
-                } catch (e) {
-                    console.warn('ensureProximityRow error for Meteora:', e?.message || e);
-                }
-            }
-            const alertsLabel = outRangeEnabled ? OUT_RANGE_ALERT_ON : OUT_RANGE_ALERT_OFF;
-
-            keyboard.inline_keyboard.push([
-                {
-                    text: alertsLabel,
-                    callback_data: `toggle_alerts_${position.mintAddress}`
-                },
-                {
-                    text: `📊 Stats`,
-                    callback_data: `stats`
-                }
-            ]);
-
-            // Row 3: Hide button if position is out of range
-            if (isOutOfRange) {
-                keyboard.inline_keyboard.push([
-                    {
-                        text: `👁️ Hide #${index + 1}`,
-                        callback_data: `toggle_hide_${position.mintAddress}`
-                    }
-                ]);
-            }
-
+        if (position.protocol === 'meteora') {
+            await appendMeteoraPositionButtons(keyboard, position, index, isOutOfRange);
             continue;
         }
 

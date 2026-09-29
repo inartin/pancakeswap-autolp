@@ -18,6 +18,8 @@ import { recordClaimTransaction } from '../../services/transaction.service.js';
 import { decryptPrivateKey } from '../../utils/encryption.util.js';
 import { formatCurrency, formatTokenAmount, formatShortAddress } from '../../utils/format.util.js';
 import { COMMITMENT_LEVEL, SPLIT_CLAIM_PERCENT, SPLIT_KEEP_PERCENT } from '../../config/constants.js';
+import { METEORA_PROGRAM_ID } from '../../protocols/meteora/constants.js';
+import { handleMeteoraClaim } from '../../protocols/meteora/claim.handler.js';
 import { updatePoolsReplyKeyboard } from '../keyboard.util.js';
 
 /**
@@ -90,7 +92,7 @@ export async function handleClaimCallback(bot, callbackQuery) {
  * @param {Array<string>} args - Command arguments [position_nft_mint]
  * 
  * @example
- * User: /claim <nft_mint_address>
+ * User: /claim <position_address>
  * OR click "Claim" button from /rewards
  */
 export async function handleClaim(bot, msg, args) {
@@ -102,9 +104,9 @@ export async function handleClaim(bot, msg, args) {
         if (args.length === 0) {
             await bot.sendMessage(chatId,
                 `❌ *Missing Position Address*\n\n` +
-                `Please provide your position NFT mint address.\n\n` +
+                `Provide a PancakeSwap NFT mint or Meteora position account address.\n\n` +
                 `*Usage:*\n` +
-                `\`/claim <nft_mint_address>\`\n\n` +
+                `\`/claim <position_address>\`\n\n` +
                 `*Find your position:*`,
                 {
                     parse_mode: 'Markdown',
@@ -213,6 +215,12 @@ export async function handleClaim(bot, msg, args) {
 
     const keypair = Keypair.fromSecretKey(bs58.decode(privateKey));
     const connection = new Connection(SOLANA_RPC_URL, COMMITMENT_LEVEL);
+
+    const account = await connection.getAccountInfo(positionMintPk);
+    if (account?.owner.equals(METEORA_PROGRAM_ID)) {
+      await handleMeteoraClaim(bot, { chatId, messageId: processingMsg.message_id, connection, keypair, wallet, address: positionMintPk });
+      return;
+    }
 
     // 7. Get claim address and split strategy settings from wallet
     const claimAddress = await getWalletClaimAddress(wallet.id);

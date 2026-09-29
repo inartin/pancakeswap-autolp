@@ -97,6 +97,11 @@ export async function confirmTransaction(connection, signature, options = {}) {
         });
         const finalStatus = finalCheck?.value?.[0];
         
+        if (finalStatus?.err) {
+          return { success: false, signature, status: 'failed',
+            error: `Transaction failed: ${JSON.stringify(finalStatus.err)}`, statusDetails: finalStatus };
+        }
+
         if (finalStatus?.confirmationStatus === 'confirmed' || 
             finalStatus?.confirmationStatus === 'finalized') {
           // Transaction actually succeeded despite appearing expired!
@@ -162,6 +167,11 @@ export async function confirmTransaction(connection, signature, options = {}) {
         });
         const finalStatus = finalCheck?.value?.[0];
         
+        if (finalStatus?.err) {
+          return { success: false, signature, status: 'failed',
+            error: `Transaction failed: ${JSON.stringify(finalStatus.err)}`, statusDetails: finalStatus };
+        }
+
         if (finalStatus?.confirmationStatus === 'confirmed' || 
             finalStatus?.confirmationStatus === 'finalized') {
           if (isDebug) console.log(`   ✅ Found in history!`);
@@ -193,6 +203,11 @@ export async function confirmTransaction(connection, signature, options = {}) {
       await new Promise(resolve => setTimeout(resolve, pollInterval));
 
     } catch (error) {
+      // Bound repeated RPC failures when the caller requests a poll limit.
+      if (maxPolls !== null && pollCount >= maxPolls) {
+        return { success: false, signature, status: 'unknown',
+          error: `Confirmation unavailable after ${maxPolls} polls: ${error.message}`, statusDetails: lastStatus };
+      }
       // RPC error - don't fail, just log and retry
       console.warn(`   ⚠️ RPC error during confirmation check (poll #${pollCount}): ${error.message}`);
       console.warn(`   Will retry after ${pollInterval}ms...`);

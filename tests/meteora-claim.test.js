@@ -134,8 +134,8 @@ test('sender retains signature on timeout and sends once', async () => {
     const transaction = new Transaction().add(SystemProgram.transfer({ fromPubkey: owner.publicKey, toPubkey: new PublicKey(recipient), lamports: 1 }));
     const result = await sendClaimTransaction({
         getLatestBlockhash: async () => ({ blockhash: Keypair.generate().publicKey.toBase58(), lastValidBlockHeight: 100 }),
-        sendRawTransaction: async () => { sends++; },
-        confirmTransaction: async () => { throw new Error('timeout'); }
+        sendRawTransaction: async () => { sends++; throw new Error('timeout'); },
+        confirmTransaction: async () => { assert.fail('WebSocket confirmation must not be used'); }
     }, transaction, owner);
     assert.equal(sends, 1);
     assert.equal(result.uncertain, true);
@@ -184,4 +184,38 @@ test('real position loader rejects missing or non-Meteora accounts before sendin
         assert.equal(result.success, false);
         assert.match(result.error, /Not a Meteora/);
     }
+});
+
+
+test('claim sender confirms over HTTP without signature subscriptions', async () => {
+    for (const scenario of [
+        { height: 50, status: { confirmationStatus: 'confirmed', err: null }, success: true },
+        { height: 50, status: { confirmationStatus: 'confirmed', err: { InstructionError: [0, 'error'] } }, success: false },
+        { height: 101, status: { confirmationStatus: 'finalized', err: null }, success: true },
+        { height: 101, status: { confirmationStatus: 'finalized', err: { InstructionError: [0, 'error'] } }, success: false },
+        { height: 101, status: null, success: false }
+    ]) {
+        let sends = 0, polls = 0;
+        const transaction = new Transaction().add(SystemProgram.transfer({ fromPubkey: owner.publicKey, toPubkey: new PublicKey(recipient), lamports: 1 }));
+        const result = await sendClaimTransaction({
+            getLatestBlockhash: async () => ({ blockhash: Keypair.generate().publicKey.toBase58(), lastValidBlockHeight: 100 }),
+            sendRawTransaction: async () => { sends++; },
+            getBlockHeight: async () => scenario.height,
+            getSignatureStatuses: async () => { polls++; return { value: [scenario.status] }; },
+            confirmTransaction: () => assert.fail('must not use WebSocket confirmation'),
+            onSignature: () => assert.fail('must not subscribe')
+        }, transaction, owner);
+        assert.equal(result.success, scenario.success);
+        assert.equal(sends, 1);
+        assert.equal(polls, 1);
+        assert.ok(result.signature);
+    }
+});
+
+test('HTTP confirmation stops at the poll limit even when the RPC keeps failing', async () => {
+    const { confirmTransaction } = await import('../src/utils/confirmation.util.js');
+    const result = await confirmTransaction({ getBlockHeight: async () => { throw new Error('RPC unavailable'); } }, 'pending-signature', { lastValidBlockHeight: 100, maxPolls: 1, pollInterval: 0 });
+    assert.equal(result.status, 'unknown');
+    assert.equal(result.success, false);
+    assert.equal(result.signature, 'pending-signature');
 });

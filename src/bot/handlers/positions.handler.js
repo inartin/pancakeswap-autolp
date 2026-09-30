@@ -133,7 +133,7 @@ export async function handlePositions(bot, msg, opts = {}) {
                     console.warn('Failed to find PancakeSwap positions:', err.message);
                     return [];
                 }),
-                fetchMeteoraDlmmPositions(walletAddress, connection).catch(err => {
+                fetchMeteoraDlmmPositions(walletAddress, connection, { liveEarnings: true }).catch(err => {
                     console.warn('Failed to find Meteora positions:', err.message);
                     return [];
                 })

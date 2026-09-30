@@ -3,6 +3,7 @@ import { PublicKey } from '@solana/web3.js';
 import { BorshCoder } from '@coral-xyz/anchor';
 import { METEORA_IDL, METEORA_PROGRAM_ID } from './constants.js';
 import { getMintDecimals } from '../../utils/token.util.js';
+import { loadMeteoraEarningsPool, readMeteoraEarningsSnapshot } from './earnings-snapshot.js';
 
 const coder = new BorshCoder(METEORA_IDL);
 const METEORA_DATAPI_URL = 'https://dlmm.datapi.meteora.ag';
@@ -31,7 +32,7 @@ export function binIdToPrice(binId, binStep, decimalsX = 0, decimalsY = 0) {
  * @param {Connection} [connection] - Solana connection instance (optional fallback)
  * @returns {Promise<Array<Object>>} Array of enriched DLMM position objects
  */
-export async function fetchMeteoraDlmmPositions(walletAddress, connection = null) {
+export async function fetchMeteoraDlmmPositions(walletAddress, connection = null, { liveEarnings = false } = {}) {
     if (!walletAddress) return [];
 
     try {
@@ -51,6 +52,11 @@ export async function fetchMeteoraDlmmPositions(walletAddress, connection = null
                 const pnlUrl = `${METEORA_DATAPI_URL}/positions/${pool.poolAddress}/pnl?user=${walletAddress}&status=open`;
                 const pnlRes = await axios.get(pnlUrl, { timeout: 8000 });
                 const poolPositions = pnlRes.data?.positions || [];
+                let livePool = null;
+                if (liveEarnings && connection && poolPositions.length > 0) {
+                    try { livePool = await loadMeteoraEarningsPool(connection, pool.poolAddress); }
+                    catch (error) { console.warn('Meteora live earnings unavailable:', error.message); }
+                }
 
                 for (const pos of poolPositions) {
                     const minPrice = parseFloat(pos.minPrice) || 0;
@@ -67,15 +73,16 @@ export async function fetchMeteoraDlmmPositions(walletAddress, connection = null
                     const fee1Usd = parseFloat(pos.unrealizedPnl?.unclaimedFeeTokenY?.usd || 0);
                     const totalUnclaimedUsd = fee0Usd + fee1Usd;
 
-                    const feePerTvl24h = parseFloat(pos.feePerTvl24h || 0); // e.g. 0.321532% per 24h
+                    const feePerTvl24h = pos.feePerTvl24h == null || pos.feePerTvl24h === '' ? null : Number(pos.feePerTvl24h);
                     const positionValueUsd = pos.unrealizedPnl?.balances || 0;
-                    const inRange = !pos.isOutOfRange;
-
-                    // feePerTvl24h is in percent (% per 24h). Convert % to daily factor (/ 100).
-                    const estDayUsd = inRange ? positionValueUsd * (feePerTvl24h / 100) : 0;
-                    const estHourUsd = estDayUsd / 24;
-                    // Annualized APR is daily percentage * 365
-                    const aprPercent = inRange ? feePerTvl24h * 365 : 0;
+                    let earningsSnapshot = null;
+                    if (livePool) {
+                        try {
+                            const priceX = Number(pnlRes.data.tokenXPrice) || null;
+                            const priceY = Number(pnlRes.data.tokenYPrice) || null;
+                            earningsSnapshot = await readMeteoraEarningsSnapshot(livePool, pos.positionAddress, priceX, priceY);
+                        } catch (error) { console.warn(`Meteora live earnings unavailable for ${pos.positionAddress}:`, error.message); }
+                    }
 
                     positionsList.push({
                         protocol: 'meteora',
@@ -115,12 +122,26 @@ export async function fetchMeteoraDlmmPositions(walletAddress, connection = null
                         allTimeFeesToken0: parseFloat(pos.allTimeFees?.tokenX?.amount || 0),
                         allTimeFeesToken1: parseFloat(pos.allTimeFees?.tokenY?.amount || 0),
                         allTimeFeesUsd: parseFloat(pos.allTimeFees?.total?.usd || 0),
-                        // Estimated APR
-                        aprData: aprPercent > 0 ? {
-                            positionApr: aprPercent,
-                            estHourUsd,
-                            estDayUsd
-                        } : null,
+                        // Rolling 24h earnings are an average, never the current rate.
+                        avgAprData: {
+                            daily: Number.isFinite(feePerTvl24h) && feePerTvl24h >= 0
+                                ? { avgPositionApr: feePerTvl24h * 365, sampleCount: 1 } : null
+                        },
+                        aprData: { positionApr: null, estHourUsd: null, estDayUsd: null, windowMinutes: null },
+                        earningsSnapshot,
+                        ...(earningsSnapshot ? {
+                            inRange: earningsSnapshot.in_range,
+                            liquidityValueUsd: earningsSnapshot.position_value_usd,
+                            amount0Human: earningsSnapshot.amount0Human,
+                            amount1Human: earningsSnapshot.amount1Human,
+                            amount0Usd: earningsSnapshot.amount0Human * (earningsSnapshot.price_x ?? 0),
+                            amount1Usd: earningsSnapshot.amount1Human * (earningsSnapshot.price_y ?? 0),
+                            currentPrice: earningsSnapshot.currentPrice,
+                            outOfRangeDirection: earningsSnapshot.in_range ? null :
+                                (earningsSnapshot.currentPrice < minPrice ? 'below' : 'above'),
+                            lowerDistancePercent: rangeWidth > 0 ? Math.abs(earningsSnapshot.currentPrice - minPrice) / rangeWidth * 100 : 0,
+                            upperDistancePercent: rangeWidth > 0 ? Math.abs(maxPrice - earningsSnapshot.currentPrice) / rangeWidth * 100 : 0
+                        } : {}),
                         positionUrl: `https://app.meteora.ag/dlmm/${pool.poolAddress}`,
                         poolUrl: `https://app.meteora.ag/dlmm/${pool.poolAddress}`,
                         createdAt: pos.createdAt || null,

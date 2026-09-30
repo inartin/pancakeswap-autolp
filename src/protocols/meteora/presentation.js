@@ -1,4 +1,36 @@
-import { formatCurrency, formatDecimal } from '../../utils/format.util.js';
+import { formatCurrency, formatDecimal, formatPercentage } from '../../utils/format.util.js';
+
+export function formatMeteoraApr(position) {
+    const apr = position.aprData;
+    let message = '\n📈 *Current APR:* ';
+    if (apr?.positionApr != null) {
+        message += formatPercentage(apr.positionApr);
+        if (apr.windowMinutes != null) message += ` (last ${apr.windowMinutes.toFixed(1)}m)`;
+    } else {
+        message += 'unavailable — collecting fresh samples';
+    }
+    const { daily, lifetime } = position.avgAprData || {};
+    if (daily?.sampleCount > 0 && daily.avgPositionApr != null) {
+        message += `\n\n📊 Avg 24h: ${formatPercentage(daily.avgPositionApr)}`;
+        if (daily.avgRangePercent != null) message += ` | Range: ±${daily.avgRangePercent.toFixed(1)}%`;
+    }
+    if (lifetime?.sampleCount >= 6 && lifetime.avgPositionApr != null) {
+        message += `\n📊 Avg All-Time: ${formatPercentage(lifetime.avgPositionApr)}`;
+        if (lifetime.avgRangePercent != null) message += ` | Range: ±${lifetime.avgRangePercent.toFixed(1)}%`;
+        if (lifetime.totalDays > 0) message += ` (${lifetime.totalDays}d)`;
+    }
+    message += '\n\n💵 *Estimated Income (current rate)*:';
+    if (apr?.estHourUsd != null && apr?.estDayUsd != null) {
+        message += `\n${formatCurrency(apr.estHourUsd)}/hr · ${formatCurrency(apr.estDayUsd)}/day\n`;
+    } else {
+        message += ' unavailable\n';
+    }
+    if (daily?.avgPositionApr != null && position.liquidityValueUsd > 0) {
+        const dayUsd = position.liquidityValueUsd * daily.avgPositionApr / 36500;
+        message += `💵 *Estimated Income (24h avg rate)*:\n${formatCurrency(dayUsd / 24)}/hr · ${formatCurrency(dayUsd)}/day\n`;
+    }
+    return message;
+}
 
 export function formatMeteoraRewards(position, index) {
     let message = '';

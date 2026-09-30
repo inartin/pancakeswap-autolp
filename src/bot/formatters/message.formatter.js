@@ -1,4 +1,4 @@
-import { formatMeteoraRewards, formatMeteoraLinks, formatMeteoraLiquidity, formatMeteoraLifetimeFees } from '../../protocols/meteora/presentation.js';
+import { formatMeteoraRewards, formatMeteoraLinks, formatMeteoraLiquidity, formatMeteoraLifetimeFees, formatMeteoraApr } from '../../protocols/meteora/presentation.js';
 import { formatShortAddress, formatCurrency, formatPercentage, formatDecimal, formatTokenAmount, getPancakeSwapPositionUrl, getPancakeSwapPoolUrl } from '../../utils/format.util.js';
 import { formatPositionVisualization } from '../../utils/visualization.util.js';
 import { getTokenInfo } from '../../utils/token.util.js';
@@ -409,7 +409,9 @@ export async function formatPositionsListMessage(positionsData) {
         if (isMeteora) message += formatMeteoraLiquidity(position, token0Symbol, token1Symbol);
 
         // APR information (if available)
-        if (position.aprData) {
+        if (isMeteora) {
+            message += formatMeteoraApr(position);
+        } else if (position.aprData) {
             const apr = position.aprData;
             message += `\n📈 *APR: *`;
 

@@ -5,7 +5,7 @@ import NotificationQueueService from './notification-queue.service.js';
 import { getPancakeSwapPoolUrl, formatShortAddress } from '../utils/format.util.js';
 import { POSITION_MONITOR_INTERVAL_MS, getTokenSymbol, RANGE_PERCENT_PRECISION, KNOWN_TOKENS, LAMPORTS_PER_SOL, IDLE_FUNDS_RECOVERY_MIN_USD, DEFAULT_ADD_LIQUIDITY_SLIPPAGE_BPS } from '../config/constants.js';
 import { db } from '../db/index.js';
-import { wallets, positions } from '../db/schema.js';
+import { wallets, positions, meteora_fee_samples } from '../db/schema.js';
 import { eq, and, inArray, like, sql } from 'drizzle-orm';
 import { resetDailyCounters, recordAprForAllActivePositions, cleanupOldAprHistory } from './position-statistics.service.js';
 import { getMarketMetrics_WS, getDataStats, initializePriceHistory } from './market-data-ws.service.js';
@@ -523,6 +523,29 @@ export function startAprHistoryJob() {
     const APR_RECORD_INTERVAL_MS = 4 * 60 * 60 * 1000; // 4 hours
     const CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
     let lastCleanup = 0;
+    let meteoraRunning = false;
+    let stopped = false;
+    const sampleMeteoraEarnings = async () => {
+        if (meteoraRunning || stopped) return;
+        meteoraRunning = true;
+        try {
+            const { fetchMeteoraDlmmPositions } = await import('../protocols/meteora/positions.js');
+            const { trackMeteoraPositions } = await import('../protocols/meteora/tracking.js');
+            // A sample is registered on discovery; only poll wallets with tracked Meteora positions.
+            const trackedWallets = await db.selectDistinct({ id: wallets.id, wallet_address: wallets.wallet_address })
+                .from(wallets).innerJoin(positions, eq(positions.wallet_id, wallets.id))
+                .innerJoin(meteora_fee_samples, eq(meteora_fee_samples.position_address, positions.nft_mint))
+                .where(eq(positions.status, 'active'));
+            const connection = createSolanaConnection();
+            for (const wallet of trackedWallets) {
+                if (stopped) break;
+                const discovered = await fetchMeteoraDlmmPositions(wallet.wallet_address, connection, { liveEarnings: true });
+                await trackMeteoraPositions(discovered, wallet, { background: true });
+            }
+        } catch (error) {
+            console.warn('Meteora earnings sampling failed:', error.message);
+        } finally { meteoraRunning = false; }
+    };
     
     const recordAprSnapshots = async () => {
         try {
@@ -562,14 +585,21 @@ export function startAprHistoryJob() {
     
     // Run on interval
     const timer = setInterval(recordAprSnapshots, APR_RECORD_INTERVAL_MS);
+    const meteoraTimer = setInterval(sampleMeteoraEarnings, 60000);
     
     // Run once 30 seconds after startup (give time for market data to initialize)
-    setTimeout(recordAprSnapshots, 30 * 1000);
+    const startupTimer = setTimeout(() => {
+        recordAprSnapshots();
+        sampleMeteoraEarnings();
+    }, 30 * 1000);
     
     console.log('📊 APR history job started (records every 4 hours)');
     
     return () => {
+        stopped = true;
         clearInterval(timer);
+        clearInterval(meteoraTimer);
+        clearTimeout(startupTimer);
         console.log('📊 APR history job stopped');
     };
 }

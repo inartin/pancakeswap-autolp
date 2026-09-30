@@ -316,6 +316,20 @@ export const price_history = sqliteTable('price_history', {
  * average APR calculations over time.
  * Retention: 45 days rolling window
  */
+export const meteora_fee_samples = sqliteTable('meteora_fee_samples', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    position_address: text('position_address').notNull(),
+    recorded_at: integer('recorded_at').notNull(), // Milliseconds; observation time, not last position mutation
+    fee_x: text('fee_x').notNull(), // Cumulative claimed + unclaimed atomic token amounts
+    fee_y: text('fee_y').notNull(),
+    decimals_x: integer('decimals_x').notNull(),
+    decimals_y: integer('decimals_y').notNull(),
+    price_x: real('price_x'),
+    price_y: real('price_y'),
+    position_value_usd: real('position_value_usd'),
+    in_range: integer('in_range', { mode: 'boolean' }).notNull()
+}, table => ({ positionTimeIdx: index('idx_meteora_fee_samples_position_time').on(table.position_address, table.recorded_at) }));
+
 export const position_apr_history = sqliteTable('position_apr_history', {
     id: integer('id').primaryKey({ autoIncrement: true }),
     position_id: integer('position_id').notNull(), // FK to positions

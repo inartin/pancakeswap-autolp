@@ -37,6 +37,10 @@ Wallet settings, encryption, persistence, alerts, and common formatting remain s
 
 Focused offline claim checks: `pnpm exec node --test tests/meteora-claim.test.js`. The existing `meteora-dlmm.test.js` is a separate live read-only discovery smoke test.
 
+Meteora current APR/income use SDK on-chain cumulative swap fees (claimed + unclaimed) in atomic token units. `earnings-snapshot.js` reads fresh bin/position state; `earnings-store.js` persists a short rolling observation history in `meteora_fee_samples`. After discovery through `/positions`, the APR job samples tracked Meteora wallets every minute without overlapping runs. Current rates use a 5–10 minute window, value token deltas at the latest available API token prices, and normalize APR to the current on-chain position value. Claims and price changes alone do not count as new earned tokens. Out-of-range positions show zero current income; missing prices, counter decreases, or gaps over two minutes make current rates unavailable until fresh samples accumulate. Restarts retain samples but require a new contiguous window after a long outage.
+
+The Data API's `feePerTvl24h` remains a separate **Avg 24h** rate, including for currently out-of-range positions. Income at that average rate is projected onto the current position value. Measured current APR is also recorded in `position_apr_history` every four hours, using the existing historical average functions and all-time display threshold. Raw fee observations retain the latest 30 minutes per sampled position; APR history retains 400 days. No 24-hour rate is substituted for missing current data. Focused offline checks: `pnpm exec node --test tests/meteora-earnings.test.js`.
+
 ---
 
 ## Adding New Commands
